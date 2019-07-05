@@ -13,7 +13,7 @@ Under construction.
 ## Cite
 Please cite our paper if you use the code or datasets in your own work:
 ```
-@article{du2018cogkr,
+@article{du2019cogkr,
   author    = {Zhengxiao Du and
                Chang Zhou and
                Ming Ding and
