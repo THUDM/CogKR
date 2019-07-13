@@ -1,0 +1,6 @@
+tqdm==4.9.0
+networkx==2.3
+torch==1.1.0
+scipy==1.2.1
+numpy==1.16.3
+tensorboardX==1.8
