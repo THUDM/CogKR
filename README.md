@@ -48,14 +48,14 @@ To use your own dataset, see the "Use your dataset" part below.
 For training, simply sun
 
 ```shell
-python main.py --directory {dataset_path} --gpu {gpu_id} --config {config_file} --load_embed DistMult --comment {experiment_name}
+python src/main.py --directory {dataset_path} --gpu {gpu_id} --config {config_file} --load_embed DistMult --comment {experiment_name}
 ```
 
-Use `dataset_path` to specify the path to the dataset, which in our expeirment should be `./datasets/NELL` or `./datasets/Wiki`.
+Use `dataset_path` to specify the path to the dataset, which in our expeirment should be `datasets/NELL` or `datasets/Wiki`.
 
 Use `gpu_id` to specify the id of the gpu to use.
 
-`config_file` is used to specify the configuration file for experimental settings and  hyperparameters. Different configurations for two datasets in the paper are stored under the `configs/` folder. `nell.json` and `wiki.json` are used to train the complete model. `nell-onlyr.json` and `wiki-onlyr.json` are used to train the CogKR-onlgR model for abalation study.
+`config_file` is used to specify the configuration file for experimental settings and  hyperparameters. Different configurations for two datasets in the paper are stored under the `configs/` folder. `config-nell.json` and `config-wiki.json` are used to train the complete model. `config-nell-onlyr.json` and `config-wiki-onlyr.json` are used to train the CogKR-onlgR model for abalation study.
 
 `experiment_name` is used to specify the name of the experiment.
 
@@ -89,7 +89,7 @@ To use your own dataset, please put the files of the dataset under `datasets/` i
 Firstly, preprocess the data
 
 ```shell
-python main.py --directory datasets/{dataset_name} --process_data
+python src/main.py --directory datasets/{dataset_name} --process_data
 ```
 
 Then you can train the model according to the "Training" part.
@@ -97,21 +97,19 @@ Then you can train the model according to the "Training" part.
 There are also two files  `evaluate_graphs` and `fact_dist` in our preprocessed dataset. `fact_dist` is used to skip some facts in the training set. To generate the file, please run
 
 ```shell
-python main.py --directory ~/data/Wiki --config configs/config-wiki.json --get_fact_dist
+python src/main.py --directory datasets/{dataset_name} --config {config_file} --get_fact_dist
 ```
-
-`evaluate_graphs` is used to 
 
 To generate `evaluate_graphs`, please run
 
 ```shell
-python main.py --directory ~/data/{dataset} --search_evaluate_graph
+python src/main.py --directory ~/data/{dataset} --search_evaluate_graph
 ```
 
 Or on the Wiki-One dataset only:
 
 ```shell
-python main.py --directory ~/data/Wiki --search_evaluate_graph --wiki
+python src/main.py --directory ~/data/Wiki --search_evaluate_graph --wiki
 ```
 
 ## Cite
