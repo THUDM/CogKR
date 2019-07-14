@@ -103,13 +103,13 @@ python src/main.py --directory datasets/{dataset_name} --config {config_file} --
 To generate `evaluate_graphs`, please run
 
 ```shell
-python src/main.py --directory ~/data/{dataset} --search_evaluate_graph
+python src/main.py --directory datasets/{dataset} --search_evaluate_graph
 ```
 
 Or on the Wiki-One dataset only:
 
 ```shell
-python src/main.py --directory ~/data/Wiki --search_evaluate_graph --wiki
+python src/main.py --directory datasets/Wiki --search_evaluate_graph --wiki
 ```
 
 ## Cite
