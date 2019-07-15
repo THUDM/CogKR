@@ -61,6 +61,14 @@ Use `gpu_id` to specify the id of the gpu to use.
 
 If you suffer from **out of memory** error when running experiments on Wiki-One, try to run the code with `--sparse_embed` to use sparse gradient for the embedding layer
 
+### Evaluation
+
+For evaluation, simply run
+
+```shell
+python src/main.py --inference --directory {dataset_path} --gpu {gpu_id} --config {config_file} --load_embed DistMult --load_state {state_file}
+```
+
 ### Use Your Own Dataset
 
 To use your own dataset, please put the files of the dataset under `datasets/` in the following structure:
@@ -99,6 +107,8 @@ There are also two files  `evaluate_graphs` and `fact_dist` in our preprocessed 
 ```shell
 python src/main.py --directory datasets/{dataset_name} --config {config_file} --get_fact_dist
 ```
+
+`evaluate_graphs` is generated according to `rel2candidates.json`. `evaluate_graphs ` is used to limit the expansion of the cognitive graph to candidate entities provided by `rel2candidates.json`.
 
 To generate `evaluate_graphs`, please run
 
