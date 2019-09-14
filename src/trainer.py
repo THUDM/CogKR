@@ -44,6 +44,9 @@ class Trainer:
                 self.e1rel2_e2.setdefault((head, relation), set())
                 self.e1rel2_e2[(head, relation)].add(tail)
             for head, relation, tail in test_eval:
+                if relation in self.train_query and relation not in self.test_relations:
+                    self.test_relations.append(relation)
+                    self.task_support[relation] = None
                 self.e1rel2_e2.setdefault((head, relation), set())
                 self.e1rel2_e2[(head, relation)].add(tail)
                 self.task_ground.setdefault(relation, [])
@@ -59,6 +62,9 @@ class Trainer:
                 self.e1rel2_e2.setdefault((head, relation), set())
                 self.e1rel2_e2[(head, relation)].add(tail)
             for head, relation, tail in valid_eval:
+                if relation in self.train_query and relation not in self.validate_relations:
+                    self.validate_relations.append(relation)
+                    self.task_support[relation] = None
                 self.e1rel2_e2.setdefault((head, relation), set())
                 self.e1rel2_e2[(head, relation)].add(tail)
                 self.task_ground.setdefault(relation, [])
