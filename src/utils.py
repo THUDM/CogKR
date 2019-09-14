@@ -13,14 +13,19 @@ def load_index(path):
     name2ids = {}
     with open(path) as file:
         for i, line in enumerate(file):
-            name2ids[line.strip()] = i
+            line = line.strip().split()
+            if len(line) == 1:
+                name2ids[line[0]] = i
+            else:
+                idx, name = line
+                name2ids[name] = int(idx)
     return name2ids
 
 
 def save_index(id2names, path):
     with open(path, "w") as output:
         for idx in range(len(id2names)):
-            output.write(id2names[idx] + "\n")
+            output.write(str(idx) + '\t' + id2names[idx] + "\n")
 
 
 def load_facts(path):

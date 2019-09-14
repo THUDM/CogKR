@@ -66,6 +66,7 @@ class Preprocess:
 
     def transform_data(self):
         self.train_facts = add_reverse_relations(self.train_facts)
+        self.raw_train_facts = self.train_facts
         self.entity_dict, self.relation_dict = build_dict(
             itertools.chain(self.train_facts, add_reverse_relations(self.test_facts),
                             add_reverse_relations(self.valid_facts)), entity_dict=self.entity_dict,
@@ -85,7 +86,7 @@ class Preprocess:
             relations = set(map(lambda x: x[1], self.valid_facts)) | set(map(lambda x: x[1], self.test_facts))
             self.rel2candidate = {key: list(range(len(self.entity_dict))) for key in relations}
 
-    def save_data(self):
+    def save_data(self, save_train=False):
         # if not os.path.exists(os.path.join(self.root_directory, "ent2ids")):
         #     serialize(self.entity_dict, os.path.join(self.root_directory, "ent2ids"), in_json=True)
         # if not os.path.exists(os.path.join(self.root_directory, "relation2ids")):
@@ -98,6 +99,8 @@ class Preprocess:
         #             relation = self.id2relation[relation]
         #         e1rel_e2[self.id2entity[head] + relation].append(self.id2entity[tail])
         #     serialize(e1rel_e2, os.path.join(self.root_directory, "e1rel_e2.json"), in_json=True)
+        if save_train:
+            save_facts(self.raw_train_facts, os.path.join(self.data_directory, "train.txt"))
         if not os.path.exists(os.path.join(self.data_directory, "rel2candidates.json")):
             rel2candidates = {key: list(map(self.id2entity.__getitem__, value)) for key, value in
                               self.rel2candidate.items()}

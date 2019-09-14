@@ -112,11 +112,11 @@ class Main:
             self.train_graphs = unserialize(os.path.join(self.data_directory, "train_graphs"))
         else:
             self.train_graphs = None
-        assert os.path.exists(os.path.join(self.data_directory, "evaluate_graphs"))
         if os.path.exists(os.path.join(self.data_directory, "evaluate_graphs")):
             print("Use evaluate graphs")
             self.evaluate_graphs = unserialize(os.path.join(self.data_directory, "evaluate_graphs"))
         else:
+            print("Warning: Can't find evaluate graphs")
             self.evaluate_graphs = None
         if os.path.exists(os.path.join(self.data_directory, "rel2candidates")):
             self.rel2candidate = unserialize(os.path.join(self.data_directory, "rel2candidates"))
@@ -535,7 +535,7 @@ if __name__ == "__main__":
         preprocess.load_index()
         preprocess.transform_data()
         if args.process_data:
-            preprocess.save_data()
+            preprocess.save_data(save_train=args.save_train)
             preprocess.compute_pagerank()
         if args.search_evaluate_graph:
             print("Search Evaluate Graph")
