@@ -57,7 +57,6 @@ class Summary(nn.Module):
         node_embeddings = self.node_activation(entity_embeddings + neighbor_embeddings)
         node_embeddings = node_embeddings.view(batch_size, -1)
         pair_embeddings = self.relation_activation(self.relation_layer(node_embeddings))
-        self.local = locals()
         if predict:
             scores = self.predict_layer(pair_embeddings)
             return scores
@@ -207,11 +206,8 @@ class CogGraph:
         for batch_id, nexthops in enumerate(actions.tolist()):
             head = currents[batch_id].item()
             aim_entity, node_ids, neighbor_ids = set(), [], []
-            if len(nexthops) > self.topk:
-                # this is the only stochastic in supervised mode
-                nexthops = random.sample(nexthops, self.topk)
             for topn, action_id in enumerate(nexthops):
-                if topn >= action_nums[batch_id]:
+                if head == self.node_pad or topn >= action_nums[batch_id]:
                     node_ids.append(self.node_pos_pad)
                     neighbor_ids.append(0)
                     continue
@@ -226,7 +222,7 @@ class CogGraph:
                     new_entity_data[0].append(batch_id)
                     new_entity_data[1].append(entity)
                     new_entity_data[2].append(len(self.node_lists[batch_id]))
-                    # todo should we revisit old nodes?
+                    # TODO should we revisit old nodes?
                     self.frontier_queues[batch_id].append(entity)
                     self.node_lists[batch_id].append(entity)
                     # record the antecedents of new node
@@ -374,7 +370,6 @@ class Agent(nn.Module):
         updated_embeddings = self.hidden_layer(aim_embeddings) + neighbor_embeddings
         updated_embeddings = self.update_activation(updated_embeddings)
         # write the updated embeddings
-        self.aggregate_local = locals()
         self.node_embeddings[batch_index.unsqueeze(-1).expand_as(node_pos), node_pos] = updated_embeddings
 
     def next_hop(self, currents: torch.Tensor, candidates) -> (torch.Tensor, torch.Tensor):
@@ -414,7 +409,6 @@ class Agent(nn.Module):
         candidate_scores = candidate_scores.masked_fill(~candidate_masks, value=-1e5)
         # generate the final scores with thresholds
         final_scores = torch.cat((candidate_scores, thresholds), dim=1)
-        self.nexthop_local = locals()
         return final_scores, candidate_masks
 
     def rank(self):
@@ -431,7 +425,7 @@ class Agent(nn.Module):
 
 class CogKR(nn.Module):
     def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_nodes: int, max_neighbors: int,
-                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True,
+                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0,
                  sparse_embed=False, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
@@ -464,6 +458,8 @@ class CogKR(nn.Module):
         self.statistician = False
         self.statistics = {'graph_size': []}
         self.reward_policy = reward_policy
+        self.reward_baseline = 0.0
+        self.baseline_lambda = baseline_lambda
 
     def clear_statistics(self):
         for value in self.statistics.values():
@@ -545,7 +541,7 @@ class CogKR(nn.Module):
             # evaluation
             if stochastic:
                 # use stochastic policy to sample actions
-                probs = nn.functional.softmax(final_scores, dim=1)
+                probs = nn.functional.softmax(final_scores, dim=1) + 1e-10
                 m = torch.distributions.multinomial.Multinomial(total_count=self.topk, probs=probs)
                 final_counts = m.sample()
                 action_counts = final_counts[:, :-1]
@@ -630,18 +626,20 @@ class CogKR(nn.Module):
                 elif self.reward_policy == 'predict':
                     rewards, _ = F.softmax(node_scores, dim=-1).max(dim=-1)
                 elif self.reward_policy == 'probability':
-                    rewards = torch.zeros(batch_size, device=node_scores.device, dtype=torch.float)
+                    rewards = torch.full((batch_size,), -10, device=node_scores.device, dtype=torch.float)
                     if len(correct_batch) > 0:
-                        rewards[correct_batch] = F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes]
+                        rewards[correct_batch] = torch.log(F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes] + 1e-10)
                 elif self.reward_policy == 'direct':
                     # directly use finding reward
                     rewards = torch.zeros(batch_size, device=node_scores.device, dtype=torch.float)
                     rewards[correct_batch] = 1.0
                 else:
-                    raise NotImplemented
+                    raise NotImplementedError
+                if self.baseline_lambda > 0.0:
+                    self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + self.baseline_lambda * rewards.mean().item()
+                    rewards -= self.reward_baseline
                 graph_loss = (- rewards * graph_loss).mean()
                 self.reward = rewards.mean().item()
-            self.local = locals()
             return graph_loss, rank_loss
         else:
             # delete the start entities
