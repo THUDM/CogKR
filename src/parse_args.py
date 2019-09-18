@@ -17,6 +17,7 @@ parser.add_argument('--get_fact_dist', action='store_true')
 parser.add_argument('--save_result', type=str, default=None)
 parser.add_argument('--save_graph', type=str, default=None)
 parser.add_argument('--inference_time', action='store_true')
+parser.add_argument('--save_minerva', action='store_true')
 
 parser.add_argument('--load_state', type=str, default=None, help='specify the state file to load')
 parser.add_argument('--load_pretrain', type=str, default=None)

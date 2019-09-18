@@ -11,10 +11,10 @@ from contextlib import ExitStack
 
 from grapher import KG
 from torch_utils import load_embedding
-from utils import unserialize, serialize, inverse_relation, load_facts, load_index, translate_facts
+from utils import unserialize, serialize, inverse_relation, load_facts, load_index, translate_facts, add_reverse_relations
 from trainer import Trainer
 from module import CogKR, Summary
-from evaluation import hitRatio, MAP, multi_mean_measure
+from evaluation import hitRatio, MAP, multi_mean_measure, MRR
 from preprocess import Preprocess
 
 
@@ -68,7 +68,7 @@ class Main:
             'Hit@5': functools.partial(hitRatio, topn=5),
             'Hit@10': functools.partial(hitRatio, topn=10),
             'hitRatio': hitRatio,
-            'MAP': MAP
+            'MRR': MAP
         }
         self.sparse_embed = sparse_embed
         self.relation_encode = relation_encode
@@ -196,6 +196,7 @@ class Main:
                            max_nodes=model_config['max_nodes'], max_neighbors=model_config['max_neighbors'],
                            embed_size=model_config['embed_size'], hidden_size=model_config['hidden_size'],
                            topk=model_config['topk'], reward_policy=model_config.get('reward_policy', 'direct'),
+                           baseline_lambda = model_config.get('baseline_lambda', 0.0),
                            device=self.device, sparse_embed=self.sparse_embed, id2entity=self.id2entity,
                            id2relation=self.id2relation,
                            use_summary=self.config['trainer'].get('meta_learn', True)).to(self.device)
@@ -220,6 +221,7 @@ class Main:
         parameter_ids = set()
         self.parameters = []
         self.optim_params = []
+        sparse_ids = set()
         self.embed_parameters = list(self.cogKR.relation_embeddings.parameters()) + list(
             self.cogKR.entity_embeddings.parameters())
         self.parameters.extend(self.embed_parameters)
@@ -234,6 +236,10 @@ class Main:
         parameter_ids.update(map(id, self.summary_parameters))
         self.agent_parameters = list(filter(lambda x: id(x) not in parameter_ids, self.cogKR.parameters()))
         self.parameters.extend(self.agent_parameters)
+        if self.sparse_embed:
+            sparse_ids.update(map(id, self.cogKR.entity_embeddings.parameters()))
+            sparse_ids.update(map(id, self.cogKR.relation_embeddings.parameters()))
+        self.dense_parameters = list(filter(lambda x: x not in sparse_ids, self.parameters))
         self.optim_params.extend([{
             'params': self.summary_parameters,
             **optimizer_config['summary'],
@@ -340,7 +346,7 @@ class Main:
                 if self.sparse_embed:
                     self.embed_optimizer.zero_grad()
                 (graph_loss + rank_loss).backward()
-                # torch.nn.utils.clip_grad_norm_(self.parameters, 0.25, norm_type='inf')
+                torch.nn.utils.clip_grad_norm_(self.dense_parameters, 0.25, norm_type='inf')
                 self.optimizer.step()
                 if self.sparse_embed:
                     self.embed_optimizer.step()
@@ -477,17 +483,18 @@ class Main:
         facts_data = list(filter(lambda x: not self.id2relation[x[1]].endswith("_inv"), self.facts_data))
         facts_data = list(
             map(lambda x: (self.id2entity[x[0]], self.id2relation[x[1]], self.id2entity[x[2]]), facts_data))
-        supports = [(self.id2entity[head], relation, self.id2entity[tail]) for relation, (head, tail) in
+        supports = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation, (head, tail) in
                     self.trainer.task_support.items()]
+        facts_data = list(itertools.chain(facts_data,supports))
         valid_evaluate = [(self.id2entity[head], relation, self.id2entity[tail]) for relation in
                           self.trainer.validate_relations for head, tail in self.trainer.task_ground[relation]]
         test_evaluate = [(self.id2entity[head], relation, self.id2entity[tail]) for relation in
                          self.trainer.test_relations for head, tail in
                          self.trainer.task_ground[relation]]
-        save_to_file(itertools.chain(facts_data, *itertools.repeat(supports, 1000)),
-                     os.path.join(data_dir, 'train.txt'))
+        save_to_file(itertools.chain(facts_data, *itertools.repeat(supports, 100)), os.path.join(data_dir, 'train.txt'))
         save_to_file(valid_evaluate, os.path.join(data_dir, "valid.txt"))
         save_to_file(test_evaluate, os.path.join(data_dir, "test.txt"))
+        save_to_file(add_reverse_relations(facts_data), os.path.join(data_dir, "graph.txt"))
         save_dict(self.entity_dict, os.path.join(data_dir, 'entities.dict'))
         save_dict(self.relation_dict, os.path.join(data_dir, 'relations.dict'))
 
@@ -550,7 +557,12 @@ if __name__ == "__main__":
         main_body.sparse_embed = args.sparse_embed
         main_body.load_data()
         main_body.build_env(main_body.config['graph'])
-        if args.get_fact_dist:
+        if args.save_minerva:
+            data_dir = os.path.join(args.directory, "minerva")
+            if not os.path.exists(data_dir):
+                os.makedirs(data_dir)
+            main_body.save_to_hyper(data_dir)
+        elif args.get_fact_dist:
             fact_dist = main_body.get_fact_dist(main_body.config['trainer']['ignore_relation'])
             serialize(fact_dist, os.path.join(main_body.data_directory, "fact_dist"))
         elif args.pretrain:

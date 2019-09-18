@@ -8,7 +8,7 @@ class Trainer:
     def __init__(self, graph: KG, train_facts, cutoff, reverse_relation: list, train_graphs: dict = None,
                  test_tasks=None, validate_tasks=None, evaluate_graphs: dict = None,
                  rel2candidate: dict = None, id2entity=None, id2relation=None, fact_dist=None,
-                 weighted_sample=True, ignore_relation=True, meta_learn=True):
+                 weighted_sample=True, ignore_relation=True, meta_learn=True, sample_weight=0.75):
         self.graph = graph
         self.cutoff = cutoff
         self.reverse_relation = reverse_relation
@@ -17,6 +17,8 @@ class Trainer:
         self.id2relation = id2relation
         self.train_query, self.train_support = {}, {}
         self.meta_learn = meta_learn
+        print("Ignore relation: {}".format(ignore_relation))
+        print("Sample weight:", sample_weight)
         # Note that we **do not** add reverse relations here
         for head, relation, tail in itertools.chain(train_facts):
             if relation not in self.train_query:
@@ -84,12 +86,13 @@ class Trainer:
         self.train_relations = list(
             filter(lambda x: len(self.train_query[x]) > 10 or x in self.test_relations or x in self.validate_relations,
                    self.train_query))
+        print("Train relations: {}".format(len(self.train_relations)))
         self.pretrain_relations = list(
             filter(lambda x: len(self.train_support[x]) + len(self.train_query[x]) > 10, self.train_support))
         if weighted_sample:
             # use weighted sampler
             self.train_sampler = WeightedRandomSampler(
-                weights=list(map(lambda x: len(self.train_query[x]) ** 0.75, self.train_relations)), num_samples=1)
+                weights=list(map(lambda x: len(self.train_query[x]) ** sample_weight, self.train_relations)), num_samples=1)
         else:
             # or use uniform sampler
             self.train_sampler = RandomSampler(range(len(self.train_relations)), num_samples=1, replacement=True)

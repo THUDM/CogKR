@@ -416,6 +416,8 @@ class Agent(nn.Module):
         :return:
         """
         node_embeddings = self.node_embeddings[:, :self.max_nodes]
+        # node_embeddings = torch.cat(
+        #     (self.node_embeddings[:, :1].expand(-1, self.max_nodes, -1), node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
         node_embeddings = torch.cat(
             (node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
         node_scores = self.rank_layer(node_embeddings).squeeze(-1)
@@ -638,7 +640,7 @@ class CogKR(nn.Module):
                 if self.baseline_lambda > 0.0:
                     self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + self.baseline_lambda * rewards.mean().item()
                     rewards -= self.reward_baseline
-                graph_loss = (- rewards * graph_loss).mean()
+                graph_loss = (- rewards.detach() * graph_loss).mean()
                 self.reward = rewards.mean().item()
             return graph_loss, rank_loss
         else:
