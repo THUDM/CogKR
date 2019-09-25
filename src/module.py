@@ -543,7 +543,7 @@ class CogKR(nn.Module):
             # evaluation
             if stochastic:
                 # use stochastic policy to sample actions
-                probs = nn.functional.softmax(final_scores, dim=1) + 1e-10
+                probs = nn.functional.softmax(final_scores, dim=1) + 1e-8
                 m = torch.distributions.multinomial.Multinomial(total_count=self.topk, probs=probs)
                 final_counts = m.sample()
                 action_counts = final_counts[:, :-1]
@@ -552,52 +552,8 @@ class CogKR(nn.Module):
                 if not evaluate:
                     # compute policy gradient here
                     graph_loss = m.log_prob(final_counts) + graph_loss
-            elif ground_graphs is None:
-                action_scores = final_scores[:, :-1]
-                # select the top-k results and compare with thresholds
-                topk = min(self.topk, action_scores.size(1))
-                action_scores, actions = torch.topk(action_scores, topk)
-                action_nums = (action_scores > final_scores[:, -1].unsqueeze(-1)).sum(dim=-1)
-                if not evaluate:
-                    # we can't optimize deterministic policy without ground truth
-                    raise NotImplemented
             else:
-                actions = []
-                # utilize the ground graph
-                action_labels = torch.zeros(batch_size, final_scores.size(1))
-                action_labels[:, -1] = 1.0
-                for batch_id in range(batch_size):
-                    current_entity = self.cog_graph.node_lists[batch_id][self.cog_graph.states[0][batch_id]]
-                    ground_graph = ground_graphs[batch_id]
-                    action = []
-                    # don't compute loss for stopped episodes
-                    if self.cog_graph.stop_states[batch_id]:
-                        action_labels[batch_id, -1] = 0.0
-                    else:
-                        if current_entity in ground_graph:
-                            for action_id, candidate_entity in enumerate(self.cog_graph.states[1][1][batch_id]):
-                                if candidate_entity in ground_graph[current_entity]:
-                                    action.append(action_id)
-                                    action_labels[batch_id, action_id] = 1.0
-                                    action_labels[batch_id, -1] = 0.0
-                        else:
-                            for action_id, candidate_entity in enumerate(self.cog_graph.states[1][1][batch_id]):
-                                if candidate_entity in ground_graph:
-                                    action.append(action_id)
-                                    action_labels[batch_id, action_id] = 1.0
-                                    action_labels[batch_id, -1] = 0.0
-                    actions.append(action)
-                    if not evaluate:
-                        # compute the log probability loss for multinomial distribution
-                        action_labels = action_labels.to(final_scores.device)
-                        # normalize the label here
-                        action_normal = action_labels.sum(dim=1, keepdim=True)
-                        action_normal += (action_normal == 0.0).type(torch.float)
-                        action_labels /= action_normal
-                        current_loss = - (action_labels * torch.nn.functional.log_softmax(final_scores, dim=-1)).sum(
-                            dim=-1)
-                        # print(current_loss)
-                        graph_loss = current_loss.mean() + graph_loss
+                raise NotImplementedError
             aims, neighbors = self.cog_graph.update(actions, action_nums)
             self.agent.aggregate(aims, neighbors)
         if self.statistician:
@@ -646,11 +602,13 @@ class CogKR(nn.Module):
         else:
             # delete the start entities
             node_scores[:, 0] = -1e5
-            _, rank_index = torch.sort(node_scores, descending=True, dim=-1)
+            node_scores = torch.softmax(node_scores, dim=-1)
+            rank_scores, rank_index = torch.sort(node_scores, descending=True, dim=-1)
+            rank_scores = rank_scores.tolist()
             rank_index = rank_index.tolist()
             results = []
             for batch_id in range(batch_size):
                 result = [self.cog_graph.node_lists[batch_id][node_id] for node_id in rank_index[batch_id] if
                           node_id < len(self.cog_graph.node_lists[batch_id])]
                 results.append(result)
-            return results
+            return results, rank_scores

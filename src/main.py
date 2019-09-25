@@ -68,7 +68,7 @@ class Main:
             'Hit@5': functools.partial(hitRatio, topn=5),
             'Hit@10': functools.partial(hitRatio, topn=10),
             'hitRatio': hitRatio,
-            'MRR': MAP
+            'MAP': MAP
         }
         self.sparse_embed = sparse_embed
         self.relation_encode = relation_encode
@@ -239,7 +239,8 @@ class Main:
         if self.sparse_embed:
             sparse_ids.update(map(id, self.cogKR.entity_embeddings.parameters()))
             sparse_ids.update(map(id, self.cogKR.relation_embeddings.parameters()))
-        self.dense_parameters = list(filter(lambda x: x not in sparse_ids, self.parameters))
+        self.dense_parameters = list(filter(lambda x: id(x) not in sparse_ids, self.parameters))
+        print(list(map(lambda x:x.size(), self.dense_parameters)))
         self.optim_params.extend([{
             'params': self.summary_parameters,
             **optimizer_config['summary'],
@@ -332,6 +333,7 @@ class Main:
     def train(self, single_step=False):
         meta_learn = self.config.get('trainer', {}).get('meta_learn', True)
         validate_metric = self.config.get('train', {}).get('validate_metric', 'MAP')
+        print('Graph loss weight:', self.config['train'].get('graph_weight', 1.0))
         try:
             for self.batch_id in self.tqdm_wrapper(self.batch_sampler):
                 support_pairs, query_heads, query_tails, relations, graphs = self.trainer.sample(
@@ -345,7 +347,7 @@ class Main:
                 self.optimizer.zero_grad()
                 if self.sparse_embed:
                     self.embed_optimizer.zero_grad()
-                (graph_loss + rank_loss).backward()
+                (self.config['train'].get('graph_weight', 1.0) * graph_loss + rank_loss).backward()
                 torch.nn.utils.clip_grad_norm_(self.dense_parameters, 0.25, norm_type='inf')
                 self.optimizer.step()
                 if self.sparse_embed:
@@ -367,7 +369,7 @@ class Main:
                         update = False
                         for key, value in test_results.items():
                             self.writer.add_scalar(key, value, self.batch_id)
-                        if key not in self.best_results or validate_results[validate_metric] >= self.best_results[
+                        if validate_metric not in self.best_results or validate_results[validate_metric] >= self.best_results[
                             validate_metric]:
                             print("Test results:", test_results)
                             self.save_state(is_best=True)

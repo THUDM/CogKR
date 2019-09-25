@@ -2,13 +2,14 @@ import random, itertools
 from grapher import KG
 from torch.utils.data import BatchSampler, SequentialSampler, WeightedRandomSampler, RandomSampler
 from utils import ListConcat, serialize
+from collections import defaultdict
 
 
 class Trainer:
     def __init__(self, graph: KG, train_facts, cutoff, reverse_relation: list, train_graphs: dict = None,
                  test_tasks=None, validate_tasks=None, evaluate_graphs: dict = None,
                  rel2candidate: dict = None, id2entity=None, id2relation=None, fact_dist=None,
-                 weighted_sample=True, ignore_relation=True, meta_learn=True, sample_weight=0.75):
+                 weighted_sample=True, ignore_relation=True, meta_learn=True, sample_weight=0.75, rollout_num=1):
         self.graph = graph
         self.cutoff = cutoff
         self.reverse_relation = reverse_relation
@@ -17,6 +18,7 @@ class Trainer:
         self.id2relation = id2relation
         self.train_query, self.train_support = {}, {}
         self.meta_learn = meta_learn
+        self.rollout_num = rollout_num
         print("Ignore relation: {}".format(ignore_relation))
         print("Sample weight:", sample_weight)
         # Note that we **do not** add reverse relations here
@@ -226,38 +228,40 @@ class Trainer:
                 batch = evaluate_data[idx[0]:idx[-1] + 1]
                 ground = ground_sets[idx[0]: idx[-1] + 1]
                 start_entities = [data[0] for data in batch]
+                entity_scores = [defaultdict(float) for _ in range(len(batch))]
                 if len(evaluate_graphs) > 0:
                     graphs = evaluate_graphs[0][idx[0]: idx[-1] + 1]
                 else:
                     graphs = None
-                if self.meta_learn:
-                    results = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs,
-                                     stochastic=True)
-                else:
-                    relations = [relation_id for _ in range(len(batch))]
-                    results = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs,
-                                     stochastic=True)
-                if save_graph:
-                    tail_entities = [data[1] for data in batch]
-                    reason_paths = module.get_correct_path(relation_id, tail_entities, return_graph=True)
-                    for i in range(len(batch)):
-                        self.reason_graphs["\t".join(
-                            (self.id2entity[start_entities[i]], relation, self.id2entity[tail_entities[i]]))] = \
-                            reason_paths[i]
-                hits = []
-                for i in range(len(batch)):
-                    if batch[i][1] in results[i]:
-                        hits.append(1.0)
+                for _ in range(self.rollout_num):
+                    if self.meta_learn:
+                        results, scores = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs,
+                                        stochastic=True)
                     else:
-                        hits.append(0.0)
-                    result = results[i]
-                    if save_result:
-                        save_result.write("\t".join([self.id2entity[start_entities[i]], relation,
-                                                     self.id2entity[batch[i][1]]] + list(
-                            map(lambda x: self.id2entity[x], result))) + "\n")
+                        relations = [relation_id for _ in range(len(batch))]
+                        results, scores = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs,
+                                        stochastic=True)
+                    if save_graph:
+                        tail_entities = [data[1] for data in batch]
+                        reason_paths = module.get_correct_path(relation_id, tail_entities, return_graph=True)
+                        for i in range(len(batch)):
+                            self.reason_graphs["\t".join(
+                                (self.id2entity[start_entities[i]], relation, self.id2entity[tail_entities[i]]))] = \
+                                reason_paths[i]
+                    for i in range(len(batch)):
+                        result, score = results[i], scores[i]
+                        if save_result:
+                            save_result.write("\t".join([self.id2entity[start_entities[i]], relation,
+                                                        self.id2entity[batch[i][1]]] + list(
+                                map(lambda x: self.id2entity[x], result))) + "\n")
+                        for j in range(len(result)):
+                            entity_scores[i][result[j]] += score[j]
+                for i in range(len(batch)):
+                    result = list(entity_scores[i])
+                    result = sorted(result, key=entity_scores[i].get, reverse=True)
                     if relation_id in self.rel2candidate:
                         result = list(
-                            filter(lambda x: (x in candidates and x not in ground[i]) or x == batch[i][1], result))
+                                filter(lambda x: (x in candidates and x not in ground[i]) or x == batch[i][1], result))
                     yield [batch[i][1]], result
         if save_result:
             save_result.close()
