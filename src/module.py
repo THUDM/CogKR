@@ -6,7 +6,10 @@ from collections import deque
 from torch_utils import list2tensor
 import networkx
 from networkx.algorithms.shortest_paths.generic import shortest_path_length
-import math, random, io, statistics
+import math
+import random
+import io
+import statistics
 
 
 class Summary(nn.Module):
@@ -411,6 +414,13 @@ class Agent(nn.Module):
         final_scores = torch.cat((candidate_scores, thresholds), dim=1)
         return final_scores, candidate_masks
 
+    def compute_score(self, start_embeddings, end_embeddings, query_representations):
+        diff_embeddings = start_embeddings - end_embeddings
+        node_embeddings = torch.cat((diff_embeddings, query_representations.expand_as(diff_embeddings)), dim=-1)
+        node_scores = self.rank_layer(node_embeddings).squeeze(-1)
+        node_scores = self.rank_activation(node_scores)
+        return node_scores
+
     def rank(self):
         """
         :return:
@@ -419,7 +429,7 @@ class Agent(nn.Module):
         # node_embeddings = torch.cat(
         #     (self.node_embeddings[:, :1].expand(-1, self.max_nodes, -1), node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
         node_embeddings = torch.cat(
-            (node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
+            (node_embeddings - node_embeddings[:, :1], self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
         node_scores = self.rank_layer(node_embeddings).squeeze(-1)
         node_scores = self.rank_activation(node_scores)
         return node_scores
@@ -427,7 +437,7 @@ class Agent(nn.Module):
 
 class CogKR(nn.Module):
     def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_nodes: int, max_neighbors: int,
-                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0,
+                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0, onlyS=False,
                  sparse_embed=False, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
@@ -439,6 +449,7 @@ class CogKR(nn.Module):
         self.max_neighbors = max_neighbors
         self.embed_size = embed_size
         self.hidden_size = hidden_size
+        self.onlyS = onlyS
         if hidden_size is None:
             self.hidden_size = embed_size
         self.topk = topk
@@ -456,7 +467,10 @@ class CogKR(nn.Module):
             print("Not use summary module")
         self.agent = Agent(self.entity_embeddings, self.relation_embeddings, self.max_nodes, self.embed_size,
                            self.hidden_size, query_size=query_size)
-        self.loss = nn.CrossEntropyLoss(reduction='sum')
+        if self.onlyS:
+            self.loss = nn.MarginRankingLoss(margin=1.0)
+        else:
+            self.loss = nn.CrossEntropyLoss(reduction='sum')
         self.statistician = False
         self.statistics = {'graph_size': []}
         self.reward_policy = reward_policy
@@ -521,18 +535,45 @@ class CogKR(nn.Module):
         return reason_list
 
     def forward(self, start_entities: list, end_entities=None, ground_graphs=None, evaluate_graphs=None,
-                support_pairs=None, relations=None, evaluate=False, stochastic=False):
+                support_pairs=None, relations=None, evaluate=False, stochastic=False, candidates=None):
         batch_size = len(start_entities)
+        device = self.entity_embeddings.weight.device
         if support_pairs is not None:
             # support for evaluate
             if not (isinstance(support_pairs[0], list) or isinstance(support_pairs[0], tuple)):
                 support_pairs = [support_pairs]
             support_embeddings = self.summary(support_pairs, evaluate=evaluate)
         else:
-            relations = torch.tensor(relations, device=self.entity_embeddings.weight.device, dtype=torch.long)
+            relations = torch.tensor(relations, device=device, dtype=torch.long)
             support_embeddings = self.relation_embeddings(relations)
+        if self.onlyS:
+            self.reward = 0.0
+            self.graph_size = 0
+            start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
+            if evaluate:
+                if candidates is None:
+                    candidates = torch.arange(self.entity_embeddings.num_embeddings,
+                                              device=device, dtype=torch.long)
+                else:
+                    candidates = torch.tensor(list(candidates), dtype=torch.long, device=device)
+                scores = self.agent.compute_score(self.entity_embeddings(
+                    start_entities.unsqueeze(1)), self.entity_embeddings(candidates.unsqueeze(0)), support_embeddings)
+                rank_scores, rank_index = torch.sort(scores, descending=True, dim=-1)
+                results = candidates[rank_index].tolist()
+                return results, rank_scores
+            else:
+                end_entities = torch.tensor(end_entities, device=device, dtype=torch.long)
+                start_entities, end_entities = start_entities.unsqueeze(-1), end_entities.unsqueeze(-1)
+                support_embeddings = support_embeddings.unsqueeze(1)
+                negative_entities = torch.randint(0, self.entity_embeddings.num_embeddings, size=(
+                    batch_size, 1000), device=device)
+                positive_scores = self.agent.compute_score(self.entity_embeddings(start_entities), self.entity_embeddings(end_entities), support_embeddings)
+                negative_scores = self.agent.compute_score(self.entity_embeddings(start_entities), self.entity_embeddings(negative_entities), support_embeddings)
+                labels = torch.ones(batch_size, 1000, dtype=torch.float, device=device)
+                rank_loss = self.loss(positive_scores, negative_scores, labels)
+                return torch.zeros(1, dtype=torch.float, device=device), rank_loss
         self.cog_graph.init(start_entities, evaluate_graphs, evaluate=evaluate)
-        start_entities = torch.tensor(start_entities, device=self.entity_embeddings.weight.device, dtype=torch.long)
+        start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
         self.agent.init(start_entities, query_representations=support_embeddings)
         graph_loss = 0.0
         while True:
@@ -543,7 +584,7 @@ class CogKR(nn.Module):
             # evaluation
             if stochastic:
                 # use stochastic policy to sample actions
-                probs = nn.functional.softmax(final_scores, dim=1) + 1e-8
+                probs = nn.functional.softmax(final_scores, dim=1)
                 m = torch.distributions.multinomial.Multinomial(total_count=self.topk, probs=probs)
                 final_counts = m.sample()
                 action_counts = final_counts[:, :-1]
@@ -563,41 +604,45 @@ class CogKR(nn.Module):
         if not evaluate:
             correct_batch, correct_nodes = self.find_correct_tails(self.cog_graph.node_lists, end_entities)
             if len(correct_batch) > 0:
-                batch_index = torch.arange(len(correct_batch), device=node_scores.device)
-                correct_batch = torch.tensor(correct_batch, dtype=torch.long, device=node_scores.device)
-                correct_nodes = torch.tensor(correct_nodes, dtype=torch.long, device=node_scores.device)
+                batch_index = torch.arange(len(correct_batch), device=device)
+                correct_batch = torch.tensor(correct_batch, dtype=torch.long, device=device)
+                correct_nodes = torch.tensor(correct_nodes, dtype=torch.long, device=device)
                 node_scores = node_scores[correct_batch]
                 node_nums = torch.tensor(list(map(len, self.cog_graph.node_lists)), dtype=torch.float,
-                                         device=node_scores.device)[correct_batch]
-                masks = torch.arange(0, self.agent.max_nodes, dtype=torch.float, device=node_scores.device).expand_as(
+                                         device=device)[correct_batch]
+                masks = torch.arange(0, self.agent.max_nodes, dtype=torch.float, device=device).expand_as(
                     node_scores) >= node_nums.unsqueeze(-1)
                 node_scores.masked_fill_(masks, -1e6)
                 rank_loss = self.loss(node_scores, correct_nodes) / batch_size
             else:
-                rank_loss = torch.zeros(1, device=node_scores.device)
+                rank_loss = torch.zeros(1, device=device)
             if stochastic:
                 if self.reward_policy == 'ranking':
                     _, rank_index = torch.sort(node_scores, descending=True, dim=-1)
-                    rewards = torch.zeros(batch_size, device=node_scores.device, dtype=torch.float)
+                    rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
                     if len(correct_batch) > 0:
                         rewards[correct_batch] = 1.0 / (rank_index[batch_index, correct_nodes] + 1).float()
                 elif self.reward_policy == 'predict':
                     rewards, _ = F.softmax(node_scores, dim=-1).max(dim=-1)
                 elif self.reward_policy == 'probability':
-                    rewards = torch.full((batch_size,), -10, device=node_scores.device, dtype=torch.float)
+                    rewards = torch.full((batch_size,), -10, device=device, dtype=torch.float)
                     if len(correct_batch) > 0:
-                        rewards[correct_batch] = torch.log(F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes] + 1e-10)
+                        rewards[correct_batch] = torch.log(
+                            F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes] + 1e-10)
                 elif self.reward_policy == 'direct':
                     # directly use finding reward
-                    rewards = torch.zeros(batch_size, device=node_scores.device, dtype=torch.float)
+                    rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
                     rewards[correct_batch] = 1.0
                 else:
                     raise NotImplementedError
                 if self.baseline_lambda > 0.0:
-                    self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + self.baseline_lambda * rewards.mean().item()
+                    self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
+                        self.baseline_lambda * rewards.mean().item()
                     rewards -= self.reward_baseline
                 graph_loss = (- rewards.detach() * graph_loss).mean()
                 self.reward = rewards.mean().item()
+            else:
+                raise NotImplementedError
             return graph_loss, rank_loss
         else:
             # delete the start entities

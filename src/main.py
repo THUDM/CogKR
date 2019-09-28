@@ -196,7 +196,7 @@ class Main:
                            max_nodes=model_config['max_nodes'], max_neighbors=model_config['max_neighbors'],
                            embed_size=model_config['embed_size'], hidden_size=model_config['hidden_size'],
                            topk=model_config['topk'], reward_policy=model_config.get('reward_policy', 'direct'),
-                           baseline_lambda = model_config.get('baseline_lambda', 0.0),
+                           baseline_lambda = model_config.get('baseline_lambda', 0.0), onlyS=model_config.get('onlyS', False),
                            device=self.device, sparse_embed=self.sparse_embed, id2entity=self.id2entity,
                            id2relation=self.id2relation,
                            use_summary=self.config['trainer'].get('meta_learn', True)).to(self.device)

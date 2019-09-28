@@ -224,6 +224,8 @@ class Trainer:
                 relation = self.id2relation[relation]
             if relation_id in self.rel2candidate:
                 candidates = set(self.rel2candidate[relation_id])
+            else:
+                candidates = None
             for idx in BatchSampler(SequentialSampler(evaluate_data), batch_size=batch_size, drop_last=False):
                 batch = evaluate_data[idx[0]:idx[-1] + 1]
                 ground = ground_sets[idx[0]: idx[-1] + 1]
@@ -235,11 +237,11 @@ class Trainer:
                     graphs = None
                 for _ in range(self.rollout_num):
                     if self.meta_learn:
-                        results, scores = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs,
+                        results, scores = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs, candidates=candidates,
                                         stochastic=True)
                     else:
                         relations = [relation_id for _ in range(len(batch))]
-                        results, scores = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs,
+                        results, scores = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs, candidates=candidates,
                                         stochastic=True)
                     if save_graph:
                         tail_entities = [data[1] for data in batch]
@@ -254,11 +256,15 @@ class Trainer:
                             save_result.write("\t".join([self.id2entity[start_entities[i]], relation,
                                                         self.id2entity[batch[i][1]]] + list(
                                 map(lambda x: self.id2entity[x], result))) + "\n")
-                        for j in range(len(result)):
-                            entity_scores[i][result[j]] += score[j]
+                        if self.rollout_num > 1:
+                            for j in range(len(result)):
+                                entity_scores[i][result[j]] += score[j]
                 for i in range(len(batch)):
-                    result = list(entity_scores[i])
-                    result = sorted(result, key=entity_scores[i].get, reverse=True)
+                    if self.rollout_num > 1:
+                        result = list(entity_scores[i])
+                        result = sorted(result, key=entity_scores[i].get, reverse=True)
+                    else:
+                        result = results[i]
                     if relation_id in self.rel2candidate:
                         result = list(
                                 filter(lambda x: (x in candidates and x not in ground[i]) or x == batch[i][1], result))
