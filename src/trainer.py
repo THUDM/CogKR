@@ -238,12 +238,10 @@ class Trainer:
                     graphs = None
                 for _ in range(self.rollout_num):
                     if self.meta_learn:
-                        results, scores = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities),
-                                        stochastic=True)
+                        results, scores = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities))
                     else:
                         relations = [relation_id for _ in range(len(batch))]
-                        results, scores = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities),
-                                        stochastic=True)
+                        results, scores = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities))
                     if save_graph:
                         reason_paths = module.get_correct_path(relation_id, tail_entities, return_graph=True)
                         for i in range(len(batch)):
