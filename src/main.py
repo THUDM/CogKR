@@ -340,10 +340,10 @@ class Main:
                     self.config['train']['batch_size'])
                 if meta_learn:
                     graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
-                                                       support_pairs=support_pairs, evaluate=False, stochastic=True)
+                                                       support_pairs=support_pairs, evaluate=False)
                 else:
                     graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
-                                                       relations=relations, evaluate=False, stochastic=True)
+                                                       relations=relations, evaluate=False)
                 self.optimizer.zero_grad()
                 if self.sparse_embed:
                     self.embed_optimizer.zero_grad()

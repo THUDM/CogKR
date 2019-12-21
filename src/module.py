@@ -535,7 +535,7 @@ class CogKR(nn.Module):
         return reason_list
 
     def forward(self, start_entities: list, end_entities=None, ground_graphs=None, evaluate_graphs=None,
-                support_pairs=None, relations=None, evaluate=False, stochastic=False, candidates=None):
+                support_pairs=None, relations=None, evaluate=False, candidates=None):
         batch_size = len(start_entities)
         device = self.entity_embeddings.weight.device
         if support_pairs is not None:
@@ -581,19 +581,15 @@ class CogKR(nn.Module):
             if sum(self.cog_graph.stop_states) == batch_size:
                 break
             final_scores, candidate_masks = self.agent.next_hop(currents, candidates)
-            # evaluation
-            if stochastic:
-                # use stochastic policy to sample actions
-                m = torch.distributions.multinomial.Multinomial(total_count=self.topk, logits=final_scores)
-                final_counts = m.sample()
-                action_counts = final_counts[:, :-1]
-                action_counts, actions = action_counts.topk(k=min(self.topk, action_counts.size(1)), dim=-1)
-                action_nums = (action_counts > 0).sum(dim=1)
-                if not evaluate:
-                    # compute policy gradient here
-                    graph_loss = m.log_prob(final_counts) + graph_loss
-            else:
-                raise NotImplementedError
+            # use stochastic policy to sample actions
+            m = torch.distributions.multinomial.Multinomial(total_count=self.topk, logits=final_scores)
+            final_counts = m.sample()
+            action_counts = final_counts[:, :-1]
+            action_counts, actions = action_counts.topk(k=min(self.topk, action_counts.size(1)), dim=-1)
+            action_nums = (action_counts > 0).sum(dim=1)
+            if not evaluate:
+                # compute policy gradient here
+                graph_loss = m.log_prob(final_counts) + graph_loss
             aims, neighbors = self.cog_graph.update(actions, action_nums)
             self.agent.aggregate(aims, neighbors)
         if self.statistician:
@@ -615,33 +611,30 @@ class CogKR(nn.Module):
                 rank_loss = self.loss(node_scores, correct_nodes) / batch_size
             else:
                 rank_loss = torch.zeros(1, device=device)
-            if stochastic:
-                if self.reward_policy == 'ranking':
-                    _, rank_index = torch.sort(node_scores, descending=True, dim=-1)
-                    rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
-                    if len(correct_batch) > 0:
-                        rewards[correct_batch] = 1.0 / (rank_index[batch_index, correct_nodes] + 1).float()
-                elif self.reward_policy == 'predict':
-                    rewards, _ = F.softmax(node_scores, dim=-1).max(dim=-1)
-                elif self.reward_policy == 'probability':
-                    rewards = torch.full((batch_size,), -10, device=device, dtype=torch.float)
-                    if len(correct_batch) > 0:
-                        rewards[correct_batch] = torch.log(
-                            F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes] + 1e-10)
-                elif self.reward_policy == 'direct':
-                    # directly use finding reward
-                    rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
-                    rewards[correct_batch] = 1.0
-                else:
-                    raise NotImplementedError
-                if self.baseline_lambda > 0.0:
-                    self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
-                        self.baseline_lambda * rewards.mean().item()
-                    rewards -= self.reward_baseline
-                graph_loss = (- rewards.detach() * graph_loss).mean()
-                self.reward = rewards.mean().item()
+            if self.reward_policy == 'ranking':
+                _, rank_index = torch.sort(node_scores, descending=True, dim=-1)
+                rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
+                if len(correct_batch) > 0:
+                    rewards[correct_batch] = 1.0 / (rank_index[batch_index, correct_nodes] + 1).float()
+            elif self.reward_policy == 'predict':
+                rewards, _ = F.softmax(node_scores, dim=-1).max(dim=-1)
+            elif self.reward_policy == 'probability':
+                rewards = torch.full((batch_size,), -10, device=device, dtype=torch.float)
+                if len(correct_batch) > 0:
+                    rewards[correct_batch] = torch.log(
+                        F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes] + 1e-10)
+            elif self.reward_policy == 'direct':
+                # directly use finding reward
+                rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
+                rewards[correct_batch] = 1.0
             else:
                 raise NotImplementedError
+            if self.baseline_lambda > 0.0:
+                self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
+                    self.baseline_lambda * rewards.mean().item()
+                rewards -= self.reward_baseline
+            graph_loss = (- rewards.detach() * graph_loss).mean()
+            self.reward = rewards.mean().item()
             return graph_loss, rank_loss
         else:
             # delete the start entities
