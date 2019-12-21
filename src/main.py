@@ -488,13 +488,13 @@ class Main:
         supports = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation, (head, tail) in
                     self.trainer.task_support.items()]
         facts_data = list(itertools.chain(facts_data,supports))
-        valid_evaluate = [(self.id2entity[head], relation, self.id2entity[tail]) for relation in
+        valid_evaluate = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation in
                           self.trainer.validate_relations for head, tail in self.trainer.task_ground[relation]]
-        test_evaluate = [(self.id2entity[head], relation, self.id2entity[tail]) for relation in
+        test_evaluate = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation in
                          self.trainer.test_relations for head, tail in
                          self.trainer.task_ground[relation]]
-        save_to_file(itertools.chain(facts_data, *itertools.repeat(supports, 100)), os.path.join(data_dir, 'train.txt'))
-        save_to_file(valid_evaluate, os.path.join(data_dir, "valid.txt"))
+        save_to_file(itertools.chain(facts_data, *itertools.repeat(supports, 1)), os.path.join(data_dir, 'train.txt'))
+        save_to_file(valid_evaluate, os.path.join(data_dir, "dev.txt"))
         save_to_file(test_evaluate, os.path.join(data_dir, "test.txt"))
         save_to_file(add_reverse_relations(facts_data), os.path.join(data_dir, "graph.txt"))
         save_dict(self.entity_dict, os.path.join(data_dir, 'entities.dict'))

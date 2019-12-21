@@ -230,6 +230,7 @@ class Trainer:
                 batch = evaluate_data[idx[0]:idx[-1] + 1]
                 ground = ground_sets[idx[0]: idx[-1] + 1]
                 start_entities = [data[0] for data in batch]
+                tail_entities = [data[1] for data in batch]
                 entity_scores = [defaultdict(float) for _ in range(len(batch))]
                 if len(evaluate_graphs) > 0:
                     graphs = evaluate_graphs[0][idx[0]: idx[-1] + 1]
@@ -237,14 +238,13 @@ class Trainer:
                     graphs = None
                 for _ in range(self.rollout_num):
                     if self.meta_learn:
-                        results, scores = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs, candidates=candidates,
+                        results, scores = module(start_entities, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities),
                                         stochastic=True)
                     else:
                         relations = [relation_id for _ in range(len(batch))]
-                        results, scores = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs, candidates=candidates,
+                        results, scores = module(start_entities, relations=relations, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities),
                                         stochastic=True)
                     if save_graph:
-                        tail_entities = [data[1] for data in batch]
                         reason_paths = module.get_correct_path(relation_id, tail_entities, return_graph=True)
                         for i in range(len(batch)):
                             self.reason_graphs["\t".join(
