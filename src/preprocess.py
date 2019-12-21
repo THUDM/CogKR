@@ -174,3 +174,17 @@ def preprocess_embedding(embed_path, data_path, model, output_path, output_model
                      os.path.join(output_path, "entity2vec." + output_model), entity_dict)
     output_embedding(os.path.join(data_path, "relation2id.txt"), state_dict['relation_embeddings.weight'],
                      os.path.join(output_path, "relation2vec." + output_model), relation_dict)
+
+if __name__ == "__main__":
+    from parse_args import args
+
+    preprocess = Preprocess(args.directory)
+    preprocess.load_raw_data()
+    preprocess.load_index()
+    preprocess.transform_data()
+    if args.process_data:
+        preprocess.save_data(save_train=args.save_train)
+        preprocess.compute_pagerank()
+    if args.search_evaluate_graph:
+        print("Search Evaluate Graph")
+        preprocess.search_evaluate_graph(wiki=args.wiki)

@@ -538,96 +538,84 @@ class Main:
 if __name__ == "__main__":
     from parse_args import args
 
-    if args.process_data or args.search_evaluate_graph:
-        preprocess = Preprocess(args.directory)
-        preprocess.load_raw_data()
-        preprocess.load_index()
-        preprocess.transform_data()
-        if args.process_data:
-            preprocess.save_data(save_train=args.save_train)
-            preprocess.compute_pagerank()
-        if args.search_evaluate_graph:
-            print("Search Evaluate Graph")
-            preprocess.search_evaluate_graph(wiki=args.wiki)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    device = torch.device('cuda:0')
+    main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment,
+                        relation_encode=args.relation_encode, tqdm_wrapper=tqdm)
+    if args.config:
+        main_body.config = unserialize(args.config)
+    main_body.sparse_embed = args.sparse_embed
+    main_body.load_data()
+    main_body.build_env(main_body.config['graph'])
+    if args.save_minerva:
+        data_dir = os.path.join(args.directory, "minerva")
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        main_body.save_to_hyper(data_dir)
+    elif args.get_fact_dist:
+        fact_dist = main_body.get_fact_dist(main_body.config['trainer']['ignore_relation'])
+        serialize(fact_dist, os.path.join(main_body.data_directory, "fact_dist"))
+    elif args.pretrain:
+        main_body.build_pretrain_model(main_body.config['model'])
+        main_body.build_pretrain_optimiaer(main_body.config['optimizer'])
+        if args.load_embed:
+            entity_embed_path = os.path.join(args.directory, ".".join(('entity2vec', args.load_embed)))
+            relation_embed_path = os.path.join(args.directory, ".".join(('relation2vec', args.load_embed)))
+            print("Load Entity Embeddings from {}".format(entity_embed_path))
+            print("Load Relation Embeddings from {}".format(relation_embed_path))
+            load_embedding(main_body.summary, entity_embed_path, relation_embed_path)
+        main_body.build_logger()
+        main_body.pretrain()
     else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
-        device = torch.device('cuda:0')
-        main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment,
-                         relation_encode=args.relation_encode, tqdm_wrapper=tqdm)
-        if args.config:
-            main_body.config = unserialize(args.config)
-        main_body.sparse_embed = args.sparse_embed
-        main_body.load_data()
-        main_body.build_env(main_body.config['graph'])
-        if args.save_minerva:
-            data_dir = os.path.join(args.directory, "minerva")
-            if not os.path.exists(data_dir):
-                os.makedirs(data_dir)
-            main_body.save_to_hyper(data_dir)
-        elif args.get_fact_dist:
-            fact_dist = main_body.get_fact_dist(main_body.config['trainer']['ignore_relation'])
-            serialize(fact_dist, os.path.join(main_body.data_directory, "fact_dist"))
-        elif args.pretrain:
-            main_body.build_pretrain_model(main_body.config['model'])
-            main_body.build_pretrain_optimiaer(main_body.config['optimizer'])
-            if args.load_embed:
-                entity_embed_path = os.path.join(args.directory, ".".join(('entity2vec', args.load_embed)))
-                relation_embed_path = os.path.join(args.directory, ".".join(('relation2vec', args.load_embed)))
-                print("Load Entity Embeddings from {}".format(entity_embed_path))
-                print("Load Relation Embeddings from {}".format(relation_embed_path))
-                load_embedding(main_body.summary, entity_embed_path, relation_embed_path)
-            main_body.build_logger()
-            main_body.pretrain()
-        else:
-            if args.inference:
-                if os.path.isdir(args.load_state):
-                    entries = list(filter(lambda x: x.endswith('.state'), os.listdir(args.load_state)))
-                    entries = sorted(entries, key=lambda x: int(x.split('.')[0]))
-                    main_body.build_logger(args.log_dir, batch_id=0)
-                    for entry in entries:
-                        if entry.endswith('.state'):
-                            batch_id = int(entry.split('.')[0])
-                            print(batch_id)
-                            state_path = os.path.join(args.load_state, entry)
-                            main_body.load_state(state_path, train=False)
-                            results = main_body.evaluate_model(mode='valid')
-                            for key, value in results.items():
-                                main_body.writer.add_scalar(key, value, batch_id)
-                else:
-                    if args.load_state:
-                        main_body.load_state(args.load_state, train=False)
-                    print("Evaluate on valid data")
-                    results = main_body.evaluate_model(mode='valid')
-                    print(results)
-                    print("Evaluate on test data")
-                    if args.save_result:
-                        save_result = os.path.join(os.path.dirname(args.load_state), args.save_result)
-                    else:
-                        save_result = None
-                    if args.save_graph:
-                        save_graph = os.path.join(os.path.dirname(args.load_state), args.save_graph)
-                    else:
-                        save_graph = None
-                    results = main_body.evaluate_model(mode='test', output=save_result, save_graph=save_graph,
-                                                       use_graph=True)
-                    print(results)
+        if args.inference:
+            if os.path.isdir(args.load_state):
+                entries = list(filter(lambda x: x.endswith('.state'), os.listdir(args.load_state)))
+                entries = sorted(entries, key=lambda x: int(x.split('.')[0]))
+                main_body.build_logger(args.log_dir, batch_id=0)
+                for entry in entries:
+                    if entry.endswith('.state'):
+                        batch_id = int(entry.split('.')[0])
+                        print(batch_id)
+                        state_path = os.path.join(args.load_state, entry)
+                        main_body.load_state(state_path, train=False)
+                        results = main_body.evaluate_model(mode='valid')
+                        for key, value in results.items():
+                            main_body.writer.add_scalar(key, value, batch_id)
             else:
                 if args.load_state:
-                    main_body.load_state(args.load_state, train=not args.inference)
+                    main_body.load_state(args.load_state, train=False)
+                print("Evaluate on valid data")
+                results = main_body.evaluate_model(mode='valid')
+                print(results)
+                print("Evaluate on test data")
+                if args.save_result:
+                    save_result = os.path.join(os.path.dirname(args.load_state), args.save_result)
                 else:
-                    main_body.build_model(main_body.config['model'])
-                    if args.load_pretrain:
-                        main_body.load_pretrain(args.load_pretrain)
-                    main_body.build_logger()
-                    main_body.build_optimizer(main_body.config['optimizer'])
-                    if args.load_embed:
-                        entity_embed_path = os.path.join(args.directory, "data",
-                                                         ".".join(('entity2vec', args.load_embed)))
-                        relation_embed_path = os.path.join(args.directory, "data",
-                                                           ".".join(('relation2vec', args.load_embed)))
-                        print("Load Entity Embeddings from {}".format(entity_embed_path))
-                        print("Load Relation Embeddings from {}".format(relation_embed_path))
-                        load_embedding(main_body.cogKR, entity_embed_path, relation_embed_path)
-                with ExitStack() as stack:
-                    stack.callback(main_body.save_state)
-                    main_body.train()
+                    save_result = None
+                if args.save_graph:
+                    save_graph = os.path.join(os.path.dirname(args.load_state), args.save_graph)
+                else:
+                    save_graph = None
+                results = main_body.evaluate_model(mode='test', output=save_result, save_graph=save_graph,
+                                                    use_graph=True)
+                print(results)
+        else:
+            if args.load_state:
+                main_body.load_state(args.load_state, train=not args.inference)
+            else:
+                main_body.build_model(main_body.config['model'])
+                if args.load_pretrain:
+                    main_body.load_pretrain(args.load_pretrain)
+                main_body.build_logger()
+                main_body.build_optimizer(main_body.config['optimizer'])
+                if args.load_embed:
+                    entity_embed_path = os.path.join(args.directory, "data",
+                                                        ".".join(('entity2vec', args.load_embed)))
+                    relation_embed_path = os.path.join(args.directory, "data",
+                                                        ".".join(('relation2vec', args.load_embed)))
+                    print("Load Entity Embeddings from {}".format(entity_embed_path))
+                    print("Load Relation Embeddings from {}".format(relation_embed_path))
+                    load_embedding(main_body.cogKR, entity_embed_path, relation_embed_path)
+            with ExitStack() as stack:
+                stack.callback(main_body.save_state)
+                main_body.train()
