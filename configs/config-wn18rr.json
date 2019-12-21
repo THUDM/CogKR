@@ -4,11 +4,11 @@
     "test_width": 2000
   },
   "model": {
-    "max_nodes": 128,
-    "max_neighbors": 32,
+    "max_nodes": 5,
+    "max_neighbors": 1,
     "embed_size": 200,
     "hidden_size": 200,
-    "topk": 5,
+    "topk": 1,
     "reward_policy": "probability",
     "baseline_lambda": 0.05
   },
@@ -34,12 +34,14 @@
     "weighted_sample": true,
     "ignore_relation": false,
     "meta_learn": false,
-    "sample_weight": 1.0
+    "sample_weight": 1.0,
+    "rollout_num": 32
   },
   "train": {
-    "batch_size": 32,
+    "batch_size": 256,
     "log_interval": 1000,
-    "evaluate_interval": 10000
+    "evaluate_interval": 10000,
+    "graph_weight": 1.0
   },
   "pretrain": {
     "batch_size": 64
