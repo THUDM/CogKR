@@ -20,18 +20,6 @@ class Preprocess:
             "pagerank": 'pagerank', "entity_dict": "entity_dict", "relation_dict": "relation_dict"
         }
 
-    # def __getattribute__(self, item):
-    #     try:
-    #         return object.__getattribute__(self, item)
-    #     except AttributeError:
-    #         if item in object.__getattribute__(self, 'data_path_dict'):
-    #             data_path_dict = object.__getattribute__(self, 'data_path_dict')
-    #             data_directory = object.__getattribute__(self, 'data_directory')
-    #             self.__setattr__(item, unserialize(os.path.join(data_directory, data_path_dict[item])))
-    #             return object.__getattribute__(self, item)
-    #         else:
-    #             raise
-
     def load_index(self):
         if os.path.exists(os.path.join(self.data_directory, 'ent2id.txt')):
             self.entity_dict = load_index(os.path.join(self.data_directory, 'ent2id.txt'))
@@ -87,18 +75,6 @@ class Preprocess:
             self.rel2candidate = {key: list(range(len(self.entity_dict))) for key in relations}
 
     def save_data(self, save_train=False):
-        # if not os.path.exists(os.path.join(self.root_directory, "ent2ids")):
-        #     serialize(self.entity_dict, os.path.join(self.root_directory, "ent2ids"), in_json=True)
-        # if not os.path.exists(os.path.join(self.root_directory, "relation2ids")):
-        #     serialize(self.relation_dict, os.path.join(self.root_directory, "relation2ids"), in_json=True)
-        # if not os.path.exists(os.path.join(self.root_directory, "e1rel_e2.json")):
-        #     e1rel_e2 = defaultdict(list)
-        #     for head, relation, tail in itertools.chain(self.facts_data, *self.test_tasks.values(),
-        #                                                 *self.valid_tasks.values()):
-        #         if isinstance(relation, int):
-        #             relation = self.id2relation[relation]
-        #         e1rel_e2[self.id2entity[head] + relation].append(self.id2entity[tail])
-        #     serialize(e1rel_e2, os.path.join(self.root_directory, "e1rel_e2.json"), in_json=True)
         if save_train:
             save_facts(self.raw_train_facts, os.path.join(self.data_directory, "train.txt"))
         if not os.path.exists(os.path.join(self.data_directory, "rel2candidates.json")):
