@@ -334,54 +334,52 @@ class Main:
         meta_learn = self.config.get('trainer', {}).get('meta_learn', True)
         validate_metric = self.config.get('train', {}).get('validate_metric', 'MAP')
         print('Graph loss weight:', self.config['train'].get('graph_weight', 1.0))
-        try:
-            for self.batch_id in self.tqdm_wrapper(self.batch_sampler):
-                support_pairs, query_heads, query_tails, relations, graphs = self.trainer.sample(
-                    self.config['train']['batch_size'])
-                if meta_learn:
-                    graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
-                                                       support_pairs=support_pairs, evaluate=False)
-                else:
-                    graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
-                                                       relations=relations, evaluate=False)
-                self.optimizer.zero_grad()
-                if self.sparse_embed:
-                    self.embed_optimizer.zero_grad()
-                (self.config['train'].get('graph_weight', 1.0) * graph_loss + rank_loss).backward()
-                torch.nn.utils.clip_grad_norm_(self.dense_parameters, 0.25, norm_type='inf')
-                self.optimizer.step()
-                if self.sparse_embed:
-                    self.embed_optimizer.step()
-                if torch.isnan(graph_loss) or torch.isnan(rank_loss):
-                    break
-                else:
-                    self.total_graph_loss += graph_loss.item()
-                    self.total_rank_loss += rank_loss.item()
-                    self.total_reward += self.cogKR.reward
-                    self.total_graph_size += self.cogKR.graph_size
-                if (self.batch_id + 1) % self.config['train']['log_interval'] == 0:
-                    self.log()
-                if (self.batch_id + 1) % self.config['train']['evaluate_interval'] == 0:
-                    with torch.no_grad():
-                        test_results = self.evaluate_model(mode='test')
-                        validate_results = self.evaluate_model(mode='valid')
-                        print("Validate results:", validate_results)
-                        update = False
-                        for key, value in test_results.items():
-                            self.writer.add_scalar(key, value, self.batch_id)
-                        if validate_metric not in self.best_results or validate_results[validate_metric] >= self.best_results[
-                            validate_metric]:
-                            print("Test results:", test_results)
-                            self.save_state(is_best=True)
-                        for key, value in validate_results.items():
-                            if key not in self.best_results or value > self.best_results[key]:
-                                self.best_results[key] = value
-                self.local = locals()
-                if single_step:
-                    break
-        except:
+        for self.batch_id in self.tqdm_wrapper(self.batch_sampler):
+            if 'max_steps' in self.config['train'] and self.batch_id > self.config['trian']['max_steps']:
+                break
+            support_pairs, query_heads, query_tails, relations, graphs = self.trainer.sample(
+                self.config['train']['batch_size'])
+            if meta_learn:
+                graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
+                                                    support_pairs=support_pairs, evaluate=False)
+            else:
+                graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
+                                                    relations=relations, evaluate=False)
+            self.optimizer.zero_grad()
+            if self.sparse_embed:
+                self.embed_optimizer.zero_grad()
+            (self.config['train'].get('graph_weight', 1.0) * graph_loss + rank_loss).backward()
+            torch.nn.utils.clip_grad_norm_(self.dense_parameters, 0.25, norm_type='inf')
+            self.optimizer.step()
+            if self.sparse_embed:
+                self.embed_optimizer.step()
+            if torch.isnan(graph_loss) or torch.isnan(rank_loss):
+                break
+            else:
+                self.total_graph_loss += graph_loss.item()
+                self.total_rank_loss += rank_loss.item()
+                self.total_reward += self.cogKR.reward
+                self.total_graph_size += self.cogKR.graph_size
+            if (self.batch_id + 1) % self.config['train']['log_interval'] == 0:
+                self.log()
+            if (self.batch_id + 1) % self.config['train']['evaluate_interval'] == 0:
+                with torch.no_grad():
+                    test_results = self.evaluate_model(mode='test')
+                    validate_results = self.evaluate_model(mode='valid')
+                    print("Validate results:", validate_results)
+                    update = False
+                    for key, value in test_results.items():
+                        self.writer.add_scalar(key, value, self.batch_id)
+                    if validate_metric not in self.best_results or validate_results[validate_metric] >= self.best_results[
+                        validate_metric]:
+                        print("Test results:", test_results)
+                        self.save_state(is_best=True)
+                    for key, value in validate_results.items():
+                        if key not in self.best_results or value > self.best_results[key]:
+                            self.best_results[key] = value
             self.local = locals()
-            raise
+            if single_step:
+                break
 
     def get_fact_dist(self, ignore_relation=True):
         graph = self.kg.to_networkx(multi=True, neighbor_limit=256)
