@@ -429,7 +429,7 @@ class Agent(nn.Module):
         # node_embeddings = torch.cat(
         #     (self.node_embeddings[:, :1].expand(-1, self.max_nodes, -1), node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
         node_embeddings = torch.cat(
-            (node_embeddings - node_embeddings[:, :1], self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
+            (node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
         node_scores = self.rank_layer(node_embeddings).squeeze(-1)
         node_scores = self.rank_activation(node_scores)
         return node_scores
@@ -584,8 +584,7 @@ class CogKR(nn.Module):
             # evaluation
             if stochastic:
                 # use stochastic policy to sample actions
-                probs = nn.functional.softmax(final_scores, dim=1)
-                m = torch.distributions.multinomial.Multinomial(total_count=self.topk, probs=probs)
+                m = torch.distributions.multinomial.Multinomial(total_count=self.topk, logits=final_scores)
                 final_counts = m.sample()
                 action_counts = final_counts[:, :-1]
                 action_counts, actions = action_counts.topk(k=min(self.topk, action_counts.size(1)), dim=-1)
