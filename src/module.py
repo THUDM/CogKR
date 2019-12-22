@@ -90,8 +90,6 @@ class CogGraph:
         self.evaluate = evaluate
         self.batch_size = len(start_entities)
         batch_index = torch.arange(0, self.batch_size, dtype=torch.long)
-        # # save the ignore relations
-        # self.ignore_relations = ignore_relations
         # each line is the head entity and relation type
         self.ground_graphs = ground_graphs
         self.neighbor_matrix = torch.zeros(self.batch_size, self.max_nodes + 2, self.max_neighbors, 2, dtype=torch.long)
@@ -153,42 +151,18 @@ class CogGraph:
             else:
                 current_antecedents.append(list(self.antecedents[batch_id][current_node]))
         current_nodes = torch.tensor(current_nodes, dtype=torch.long)
-        if self.evaluate:
-            candidate_nodes, candidate_entities, candidate_relations = [], [], []
-            for batch_id in range(self.batch_size):
-                current_entity = current_entities[batch_id]
-                edges = self.graph.my_edges(current_entity, batch_id=None)
-                if self.ground_graphs is not None and self.ground_graphs[batch_id]:
-                    if current_entity in self.ground_graphs[batch_id]:
-                        edges = filter(lambda x: x[1] in self.ground_graphs[batch_id][current_entity], edges)
-                    else:
-                        edges = []
-                edges = filter(lambda x: x[1] not in current_antecedents[batch_id], edges)
-                edges = list(edges)
-                candidate_entities.append(list(map(lambda x: x[1], edges)))
-                candidate_relations.append(list(map(lambda x: x[2], edges)))
-                candidate_nodes.append(list(
-                    map(lambda x: self.entity2node[batch_id].get(x, self.node_pad), candidate_entities[batch_id])))
-            candidate_nums = torch.tensor(list(map(len, candidate_nodes)), dtype=torch.long, device=self.device)
-            candidate_nodes = list2tensor(candidate_nodes, padding_idx=self.node_pad, dtype=torch.long)
-            candidate_entities = list2tensor(candidate_entities, padding_idx=self.entity_pad, dtype=torch.long)
-            candidate_relations = list2tensor(candidate_relations, padding_idx=self.relation_pad, dtype=torch.long)
-            candidate_masks = torch.arange(0, candidate_entities.size(1), device=self.device).unsqueeze(
-                0) < candidate_nums.unsqueeze(-1)
-            self.states = (current_nodes, (candidate_nodes, candidate_entities, candidate_relations))
-        else:
-            current_entities = torch.tensor(current_entities, dtype=torch.long)
-            candidates, candidate_masks = self.graph.quick_edges(current_entities)
-            candidate_entities, candidate_relations = candidates[:, :, 0], candidates[:, :, 1]
-            candidate_nodes = self.entity_translate[
-                batch_index.unsqueeze(-1).expand_as(candidate_entities), candidate_entities]
-            self.states = (current_nodes, (candidate_nodes, candidate_entities, candidate_relations))
-            current_antecedents = list2tensor(current_antecedents, padding_idx=self.entity_pad, dtype=torch.long,
-                                              device=self.device).unsqueeze(
-                1)
-            candidate_entities = candidate_entities.to(self.device)
-            candidate_masks = candidate_masks.to(self.device)
-            candidate_masks &= ((candidate_entities.unsqueeze(-1) == current_antecedents).sum(dim=-1) == 0)
+        current_entities = torch.tensor(current_entities, dtype=torch.long)
+        candidates, candidate_masks = self.graph.quick_edges(current_entities)
+        candidate_entities, candidate_relations = candidates[:, :, 0], candidates[:, :, 1]
+        candidate_nodes = self.entity_translate[
+            batch_index.unsqueeze(-1).expand_as(candidate_entities), candidate_entities]
+        self.states = (current_nodes, (candidate_nodes, candidate_entities, candidate_relations))
+        # current_antecedents = list2tensor(current_antecedents, padding_idx=self.entity_pad, dtype=torch.long,
+                                        #   device=self.device).unsqueeze(
+            # 1)
+        candidate_entities = candidate_entities.to(self.device)
+        candidate_masks = candidate_masks.to(self.device)
+        # candidate_masks &= ((candidate_entities.unsqueeze(-1) == current_antecedents).sum(dim=-1) == 0)
         return current_nodes.to(self.device), (
             candidate_nodes.to(self.device), candidate_entities.to(self.device), candidate_relations.to(self.device),
             candidate_masks.to(self.device))
@@ -305,7 +279,7 @@ class Agent(nn.Module):
         self.nexthop_activation = nn.LeakyReLU()
         self.candidate_layer = nn.Linear(2 * embed_size + hidden_size, hidden_size)
         self.candidate_activation = nn.LeakyReLU()
-        self.gate_layer = nn.Linear(hidden_size + query_size, 1)
+        self.gate_layer = nn.Linear(hidden_size, 1)
         self.rank_layer = nn.Linear(hidden_size + query_size, 1)
         # this should combine with the loss function
         self.rank_activation = nn.Sequential()
@@ -404,7 +378,7 @@ class Agent(nn.Module):
         # (batch_size, max_neighbors, embed_size) transformed representations
         candidate_embeddings = self.candidate_activation(self.candidate_layer(candidate_embeddings))
         # (batch_size, 1) thresholds for expansion
-        thresholds = self.gate_layer(current_embeddings)
+        thresholds = self.gate_layer(current_state)
         # (batch_size, max_neighbors) (batch_size, 1, 1, embed_size) * (batch_size, max_neighbors, embed_size, 1)
         candidate_scores = torch.matmul(current_state.unsqueeze(1).unsqueeze(2),
                                         candidate_embeddings.unsqueeze(-1)).squeeze(-1).squeeze(-1)
@@ -438,7 +412,7 @@ class Agent(nn.Module):
 class CogKR(nn.Module):
     def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_nodes: int, max_neighbors: int,
                  embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0, onlyS=False,
-                 sparse_embed=False, id2entity=None, id2relation=None):
+                 sparse_embed=False, use_rank=True, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
         self.entity_dict = entity_dict
@@ -450,6 +424,7 @@ class CogKR(nn.Module):
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         self.onlyS = onlyS
+        self.use_rank = use_rank
         if hidden_size is None:
             self.hidden_size = embed_size
         self.topk = topk
@@ -481,18 +456,20 @@ class CogKR(nn.Module):
         for value in self.statistics.values():
             value.clear()
 
-    def find_correct_tails(self, node_lists, end_entities):
+    def find_correct_tails(self, node_lists, end_entities, only_last=False):
         assert len(node_lists) == len(end_entities)
         correct_batch, correct_nodes = [], []
         for batch_id in range(len(node_lists)):
             end_entity = end_entities[batch_id]
             found_correct = False
-            if len(self.cog_graph.node_lists[batch_id]) > 1:
-                for node_id in range(len(self.cog_graph.node_lists[batch_id])):
-                    if self.cog_graph.node_lists[batch_id][node_id] == end_entity:
-                        correct_nodes.append(node_id)
-                        found_correct = True
-                        break
+            start = 0
+            if only_last:
+                start = len(self.cog_graph.node_lists[batch_id]) - 1
+            for node_id in range(start, len(self.cog_graph.node_lists[batch_id])):
+                if self.cog_graph.node_lists[batch_id][node_id] == end_entity:
+                    correct_nodes.append(node_id)
+                    found_correct = True
+                    break
             if found_correct:
                 correct_batch.append(batch_id)
         return correct_batch, correct_nodes
@@ -540,8 +517,6 @@ class CogKR(nn.Module):
         device = self.entity_embeddings.weight.device
         if support_pairs is not None:
             # support for evaluate
-            if not (isinstance(support_pairs[0], list) or isinstance(support_pairs[0], tuple)):
-                support_pairs = [support_pairs]
             support_embeddings = self.summary(support_pairs, evaluate=evaluate)
         else:
             relations = torch.tensor(relations, device=device, dtype=torch.long)
@@ -589,16 +564,18 @@ class CogKR(nn.Module):
             action_nums = (action_counts > 0).sum(dim=1)
             if not evaluate:
                 # compute policy gradient here
-                graph_loss = m.log_prob(final_counts) + graph_loss
+                log_prob = m.log_prob(final_counts) * (~torch.tensor(self.cog_graph.stop_states, device=device)).float()
+                graph_loss = log_prob + graph_loss
             aims, neighbors = self.cog_graph.update(actions, action_nums)
             self.agent.aggregate(aims, neighbors)
         if self.statistician:
             self.statistics['graph_size'] += list(map(len, self.cog_graph.node_lists))
         self.graph_size = statistics.mean(map(len, self.cog_graph.node_lists))
-        node_scores = self.agent.rank()
+        if self.use_rank:
+            node_scores = self.agent.rank()
         if not evaluate:
-            correct_batch, correct_nodes = self.find_correct_tails(self.cog_graph.node_lists, end_entities)
-            if len(correct_batch) > 0:
+            correct_batch, correct_nodes = self.find_correct_tails(self.cog_graph.node_lists, end_entities, only_last=not self.use_rank)
+            if self.use_rank and len(correct_batch) > 0:
                 batch_index = torch.arange(len(correct_batch), device=device)
                 correct_batch = torch.tensor(correct_batch, dtype=torch.long, device=device)
                 correct_nodes = torch.tensor(correct_nodes, dtype=torch.long, device=device)
@@ -629,23 +606,29 @@ class CogKR(nn.Module):
                 rewards[correct_batch] = 1.0
             else:
                 raise NotImplementedError
+            self.reward = rewards.mean().item()
             if self.baseline_lambda > 0.0:
                 self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
                     self.baseline_lambda * rewards.mean().item()
                 rewards -= self.reward_baseline
             graph_loss = (- rewards.detach() * graph_loss).mean()
-            self.reward = rewards.mean().item()
             return graph_loss, rank_loss
         else:
             # delete the start entities
-            node_scores[:, 0] = -1e5
-            node_scores = torch.softmax(node_scores, dim=-1)
-            rank_scores, rank_index = torch.sort(node_scores, descending=True, dim=-1)
-            rank_scores = rank_scores.tolist()
-            rank_index = rank_index.tolist()
-            results = []
-            for batch_id in range(batch_size):
-                result = [self.cog_graph.node_lists[batch_id][node_id] for node_id in rank_index[batch_id] if
-                          node_id < len(self.cog_graph.node_lists[batch_id])]
-                results.append(result)
+            if self.use_rank:
+                node_scores[:, 0] = -1e5
+                node_scores = torch.softmax(node_scores, dim=-1)
+                rank_scores, rank_index = torch.sort(node_scores, descending=True, dim=-1)
+                rank_scores = rank_scores.tolist()
+                rank_index = rank_index.tolist()
+                results = []
+                for batch_id in range(batch_size):
+                    result = [self.cog_graph.node_lists[batch_id][node_id] for node_id in rank_index[batch_id] if
+                            node_id < len(self.cog_graph.node_lists[batch_id])]
+                    results.append(result)
+            else:
+                rank_scores = [[1] for _ in range(batch_size)]
+                results = []
+                for batch_id in range(batch_size):
+                    results.append([self.cog_graph.node_lists[batch_id][-1]])
             return results, rank_scores
