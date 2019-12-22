@@ -193,13 +193,9 @@ class Main:
     def build_model(self, model_config):
         self.config['model'] = model_config
         self.cogKR = CogKR(graph=self.kg, entity_dict=self.entity_dict, relation_dict=self.relation_dict,
-                           max_nodes=model_config['max_nodes'], max_neighbors=model_config['max_neighbors'],
-                           embed_size=model_config['embed_size'], hidden_size=model_config['hidden_size'],
-                           topk=model_config['topk'], reward_policy=model_config.get('reward_policy', 'direct'),
-                           baseline_lambda = model_config.get('baseline_lambda', 0.0), onlyS=model_config.get('onlyS', False),
                            device=self.device, sparse_embed=self.sparse_embed, id2entity=self.id2entity,
                            id2relation=self.id2relation,
-                           use_summary=self.config['trainer'].get('meta_learn', True)).to(self.device)
+                           use_summary=self.config['trainer'].get('meta_learn', True), **model_config).to(self.device)
         self.agent = self.cogKR.agent
         self.coggraph = self.cogKR.cog_graph
         self.summary = self.cogKR.summary
@@ -275,7 +271,7 @@ class Main:
             results = multi_mean_measure(
                 self.trainer.evaluate_generator(self.cogKR, self.trainer.evaluate(mode=mode, **kwargs),
                                                 save_result=output,
-                                                save_graph=save_graph),
+                                                save_graph=save_graph, batch_size=self.config['train'].get('test_batch_size', 32)),
                 self.measure_dict)
             if self.args.inference_time:
                 print(time.time() - current)
@@ -326,7 +322,7 @@ class Main:
         self.writer.add_scalar('rank_loss', self.total_rank_loss / interval, self.batch_id)
         self.writer.add_scalar('reward', self.total_reward / interval, self.batch_id)
         self.writer.add_scalar('graph_size', self.total_graph_size / interval, self.batch_id)
-        print(self.total_graph_loss, self.total_rank_loss)
+        print(self.total_graph_loss, self.total_rank_loss, self.total_reward / interval)
         self.total_graph_loss, self.total_rank_loss = 0.0, 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
 
@@ -335,7 +331,7 @@ class Main:
         validate_metric = self.config.get('train', {}).get('validate_metric', 'MAP')
         print('Graph loss weight:', self.config['train'].get('graph_weight', 1.0))
         for self.batch_id in self.tqdm_wrapper(self.batch_sampler):
-            if 'max_steps' in self.config['train'] and self.batch_id > self.config['trian']['max_steps']:
+            if 'max_steps' in self.config['train'] and self.batch_id > self.config['train']['max_steps']:
                 break
             support_pairs, query_heads, query_tails, relations, graphs = self.trainer.sample(
                 self.config['train']['batch_size'])
