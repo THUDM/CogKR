@@ -81,27 +81,24 @@ class KG:
         edge_nums = self.edge_nums[sources]
         edges = edges[:, :torch.max(edge_nums)].long()
         masks = torch.arange(0, edges.size(1)).unsqueeze(0) < edge_nums.unsqueeze(-1)
-        if self.ignore_relation_vectors is not None:
-            masks &= ((edges[:, :, 1].unsqueeze(-1) == self.ignore_relation_vectors).sum(dim=2) == 0)
         if self.ignore_edge_vectors is not None:
-            correct_batch = sources == self.ignore_edge_vectors[0]
-            if correct_batch.any():
-                masks[correct_batch] &= (
-                        (edges[correct_batch] != self.ignore_edge_vectors[1][correct_batch].unsqueeze(1)).sum(
-                            dim=2) != 0)
+            for ignore_edge_vector in self.ignore_edge_vectors:
+                correct_batch = sources == ignore_edge_vector[0]
+                if correct_batch.any():
+                    masks[correct_batch] &= (
+                            (edges[correct_batch] != ignore_edge_vector[1][correct_batch].unsqueeze(1)).sum(
+                                dim=2) != 0)
         return edges, masks
 
     def ignore_batch(self):
-        if self.ignore_relations is not None:
-            self.ignore_relation_vectors = torch.tensor(self.ignore_relations, dtype=torch.long,
-                                                        device=self.device).unsqueeze(1)
-        else:
-            self.ignore_relation_vectors = None
         if self.ignore_edges is not None:
-            self.ignore_edge_vectors = (
+            self.ignore_edge_vectors = [(
                 torch.tensor(list(map(lambda x: x[0][0], self.ignore_edges)), dtype=torch.long, device=self.device),
                 torch.tensor(list(map(lambda x: (x[0][1], x[0][2]), self.ignore_edges)), dtype=torch.long,
-                             device=self.device))
+                             device=self.device)), (
+                torch.tensor(list(map(lambda x: x[1][0], self.ignore_edges)), dtype=torch.long, device=self.device),
+                torch.tensor(list(map(lambda x: (x[1][1], x[1][2]), self.ignore_edges)), dtype=torch.long,
+                             device=self.device))]
         else:
             self.ignore_edge_vectors = None
 
