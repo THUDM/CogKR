@@ -245,6 +245,8 @@ class Main:
                                                                                 **optimizer_config['config'])
         self.total_graph_loss, self.total_rank_loss = 0.0, 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
+        self.entropy_beta = self.config['train'].get('entropy_beta', 0.0)
+        print("Entropy beta: ", self.entropy_beta)
 
     def save_state(self, is_best=False):
         if is_best:
@@ -336,15 +338,15 @@ class Main:
             support_pairs, query_heads, query_tails, relations, graphs = self.trainer.sample(
                 self.config['train']['batch_size'])
             if meta_learn:
-                graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
+                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, end_entities=query_tails,
                                                     support_pairs=support_pairs, evaluate=False)
             else:
-                graph_loss, rank_loss = self.cogKR(query_heads, end_entities=query_tails,
+                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, end_entities=query_tails,
                                                     relations=relations, evaluate=False)
             self.optimizer.zero_grad()
             if self.sparse_embed:
                 self.embed_optimizer.zero_grad()
-            (self.config['train'].get('graph_weight', 1.0) * graph_loss + rank_loss).backward()
+            (self.config['train'].get('graph_weight', 1.0) * graph_loss + rank_loss - self.entropy_beta * entropy_loss).backward()
             torch.nn.utils.clip_grad_norm_(self.dense_parameters, 0.25, norm_type='inf')
             self.optimizer.step()
             if self.sparse_embed:
@@ -356,6 +358,9 @@ class Main:
                 self.total_rank_loss += rank_loss.item()
                 self.total_reward += self.cogKR.reward
                 self.total_graph_size += self.cogKR.graph_size
+            if (self.batch_id + 1) % 200 == 0:
+                self.entropy_beta *= 0.9
+                print("Beta decay to: ", self.entropy_beta)
             if (self.batch_id + 1) % self.config['train']['log_interval'] == 0:
                 self.log()
             if (self.batch_id + 1) % self.config['train']['evaluate_interval'] == 0:

@@ -43,8 +43,9 @@
     "batch_size": 128,
     "test_batch_size": 64,
     "log_interval": 200,
-    "evaluate_interval": 1000,
-    "max_steps": 100000
+    "evaluate_interval": 10000,
+    "max_steps": 40000,
+    "entropy_beta": 1e-2
   },
   "pretrain": {
     "batch_size": 64

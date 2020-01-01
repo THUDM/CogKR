@@ -550,7 +550,7 @@ class CogKR(nn.Module):
         self.cog_graph.init(start_entities, evaluate_graphs, evaluate=evaluate)
         start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
         self.agent.init(start_entities, query_representations=support_embeddings)
-        graph_loss = 0.0
+        graph_loss, entropy_loss = 0.0, 0.0
         while True:
             currents, candidates = self.cog_graph.step()
             if sum(self.cog_graph.stop_states) == batch_size:
@@ -566,6 +566,8 @@ class CogKR(nn.Module):
                 # compute policy gradient here
                 log_prob = m.log_prob(final_counts) * (~torch.tensor(self.cog_graph.stop_states, device=device)).float()
                 graph_loss = log_prob + graph_loss
+                entropy = -(torch.softmax(final_scores, dim=-1) * nn.functional.log_softmax(final_scores, dim=-1)).sum(dim=-1).mean()
+                entropy_loss += entropy
             aims, neighbors = self.cog_graph.update(actions, action_nums)
             self.agent.aggregate(aims, neighbors)
         if self.statistician:
@@ -612,7 +614,7 @@ class CogKR(nn.Module):
                     self.baseline_lambda * rewards.mean().item()
                 rewards -= self.reward_baseline
             graph_loss = (- rewards.detach() * graph_loss).mean()
-            return graph_loss, rank_loss
+            return graph_loss, rank_loss, entropy_loss
         else:
             # delete the start entities
             if self.use_rank:
