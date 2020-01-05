@@ -163,7 +163,7 @@ class CogGraph:
         candidate_entities = candidate_entities.to(self.device)
         candidate_masks = candidate_masks.to(self.device)
         # candidate_masks &= ((candidate_entities.unsqueeze(-1) == current_antecedents).sum(dim=-1) == 0)
-        return current_nodes.to(self.device), (
+        return (current_nodes.to(self.device), current_entities.to(self.device)), (
             candidate_nodes.to(self.device), candidate_entities.to(self.device), candidate_relations.to(self.device),
             candidate_masks.to(self.device))
 
@@ -275,7 +275,7 @@ class Agent(nn.Module):
         self.pass_layer = nn.Linear(embed_size + hidden_size, hidden_size)
         self.pass_activation = nn.Sequential()
         self.update_activation = nn.LeakyReLU()
-        self.nexthop_layer = nn.Linear(hidden_size + query_size, hidden_size)
+        self.nexthop_layer = nn.Linear(hidden_size + query_size + embed_size, hidden_size)
         self.nexthop_activation = nn.LeakyReLU()
         self.candidate_layer = nn.Linear(2 * embed_size + hidden_size, hidden_size)
         self.candidate_activation = nn.LeakyReLU()
@@ -349,7 +349,7 @@ class Agent(nn.Module):
         # write the updated embeddings
         self.node_embeddings[batch_index.unsqueeze(-1).expand_as(node_pos), node_pos] = updated_embeddings
 
-    def next_hop(self, currents: torch.Tensor, candidates) -> (torch.Tensor, torch.Tensor):
+    def next_hop(self, currents: tuple, candidates) -> (torch.Tensor, torch.Tensor):
         """
         :param currents: (batch_size, ) pos of current entities
         :param candidates: entity id (batch_size, max_neighbors)
@@ -359,13 +359,15 @@ class Agent(nn.Module):
         :param topk: topk actions to select
         :return: entity id (batch_size, topk), relation id (batch_size, topk) mask (batch_size, topk)
         """
+        current_nodes, current_entities = currents
         candidate_nodes, candidate_entities, candidate_relations, candidate_masks = candidates
         batch_size, max_neighbors = candidate_nodes.size()
-        batch_index = torch.arange(batch_size, device=currents.device)
+        batch_index = torch.arange(batch_size, device=current_nodes.device)
         # (batch_size, embed_size) get the hidden representations of current nodes
-        current_embeddings = self.node_embeddings[batch_index, currents]
+        current_representations = self.node_embeddings[batch_index, current_nodes]
+        current_embeddings = self.entity_embeddings(current_entities)
         # concatenate the hidden states with query embeddings
-        current_embeddings = torch.cat((current_embeddings, self.query_representations), dim=1)
+        current_embeddings = torch.cat((current_representations, self.query_representations, current_embeddings), dim=1)
         current_state = self.nexthop_activation(self.nexthop_layer(current_embeddings))
         # (batch_size, max_neighbors, embed_size) get the node representations of candidates
         node_embeddings = self.node_embeddings[batch_index.unsqueeze(-1).expand_as(candidate_nodes), candidate_nodes]
@@ -550,6 +552,7 @@ class CogKR(nn.Module):
         self.cog_graph.init(start_entities, evaluate_graphs, evaluate=evaluate)
         start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
         self.agent.init(start_entities, query_representations=support_embeddings)
+        # TODO: Normalize graph loss and entropy loss with time step
         graph_loss, entropy_loss = 0.0, 0.0
         while True:
             currents, candidates = self.cog_graph.step()
