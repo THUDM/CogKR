@@ -106,6 +106,7 @@ class CogGraph:
         self.entity_translate = torch.full((self.batch_size, len(self.entity_dict) + 1), fill_value=self.node_pad,
                                            dtype=torch.long)
         self.entity_translate[batch_index, start_entities] = 0
+        self.current_nodes = [set([0]) for _ in range(self.batch_size)]
         if self.debug:
             self.debug_outputs = [io.StringIO() for _ in range(self.batch_size)]
 
@@ -146,10 +147,10 @@ class CogGraph:
             current_node = self.entity2node[batch_id][current_entity]
             current_nodes.append(current_node)
             current_entities.append(current_entity)
-            if self.evaluate:
-                current_antecedents.append(self.antecedents[batch_id][current_node])
-            else:
-                current_antecedents.append(list(self.antecedents[batch_id][current_node]))
+            # if self.evaluate:
+            #     current_antecedents.append(self.antecedents[batch_id][current_node])
+            # else:
+            #     current_antecedents.append(list(self.antecedents[batch_id][current_node]))
         current_nodes = torch.tensor(current_nodes, dtype=torch.long)
         current_entities = torch.tensor(current_entities, dtype=torch.long)
         candidates, candidate_masks = self.graph.quick_edges(current_entities)
@@ -182,6 +183,7 @@ class CogGraph:
         neighbor_nums = self.neighbor_nums.tolist()
         for batch_id, nexthops in enumerate(actions.tolist()):
             head = currents[batch_id].item()
+            current_node = set()
             aim_entity, node_ids, neighbor_ids = set(), [], []
             for topn, action_id in enumerate(nexthops):
                 if head == self.node_pad or topn >= action_nums[batch_id]:
@@ -199,16 +201,17 @@ class CogGraph:
                     new_entity_data[0].append(batch_id)
                     new_entity_data[1].append(entity)
                     new_entity_data[2].append(len(self.node_lists[batch_id]))
-                    # TODO should we revisit old nodes?
-                    self.frontier_queues[batch_id].append(entity)
                     self.node_lists[batch_id].append(entity)
                     # record the antecedents of new node
-                    self.antecedents[batch_id].append(
-                        {self.node_lists[batch_id][head]} | self.antecedents[batch_id][head])
+                    # self.antecedents[batch_id].append(
+                    #     {self.node_lists[batch_id][head]} | self.antecedents[batch_id][head])
                     if self.debug:
                         self.debug_outputs[batch_id].write("New node added ")
+                # TODO should we revisit old nodes?
+                self.frontier_queues[batch_id].append(entity)
                 node_id = self.entity2node[batch_id][entity]
                 neighbor_num = neighbor_nums[batch_id][node_id]
+                current_node.add(node_id)
                 if neighbor_num >= self.max_neighbors:
                     node_ids.append(self.node_pos_pad)
                     neighbor_ids.append(0)
@@ -222,8 +225,10 @@ class CogGraph:
                 neighbor_ids.append(neighbor_num)
                 neighbor_nums[batch_id][node_id] += 1
                 # update the antecedent information
-                self.antecedents[batch_id][node_id].add(self.node_lists[batch_id][head])
-                self.antecedents[batch_id][node_id].update(self.antecedents[batch_id][head])
+                # self.antecedents[batch_id][node_id].add(self.node_lists[batch_id][head])
+                # self.antecedents[batch_id][node_id].update(self.antecedents[batch_id][head])
+            if current_node:
+                self.current_nodes[batch_id] = current_node
             aim_entities.append(list(aim_entity))
             node_id_batch.append(node_ids)
             neighbor_id_batch.append(neighbor_ids)
@@ -262,13 +267,9 @@ class Agent(nn.Module):
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         self.sqrt_embed_size = math.sqrt(self.embed_size)
-        # self.num_entity = num_entity
-        # self.num_relation = num_relation
         self.max_nodes = max_nodes
         if query_size is None:
             query_size = hidden_size
-        # self.entity_embeddings = nn.Embedding(num_entity + 1, embed_size, padding_idx=num_entity)
-        # self.relation_embeddings = nn.Embedding(num_relation + 1, embed_size, padding_idx=num_relation)
         self.entity_embeddings = entity_embeddings
         self.relation_embeddings = relation_embeddings
         self.hidden_layer = nn.Linear(embed_size, hidden_size)
@@ -412,7 +413,7 @@ class Agent(nn.Module):
 
 
 class CogKR(nn.Module):
-    def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_nodes: int, max_neighbors: int,
+    def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int, max_neighbors: int,
                  embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0, onlyS=False,
                  sparse_embed=False, use_rank=True, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
@@ -421,6 +422,7 @@ class CogKR(nn.Module):
         self.relation_dict = relation_dict
         self.id2entity = id2entity
         self.id2relation = id2relation
+        self.max_steps = max_steps
         self.max_nodes = max_nodes
         self.max_neighbors = max_neighbors
         self.embed_size = embed_size
@@ -464,10 +466,11 @@ class CogKR(nn.Module):
         for batch_id in range(len(node_lists)):
             end_entity = end_entities[batch_id]
             found_correct = False
-            start = 0
             if only_last:
-                start = len(self.cog_graph.node_lists[batch_id]) - 1
-            for node_id in range(start, len(self.cog_graph.node_lists[batch_id])):
+                node_list = self.cog_graph.current_nodes[batch_id]
+            else:
+                node_list = range(0, len(self.cog_graph.node_lists[batch_id]))
+            for node_id in node_list:
                 if self.cog_graph.node_lists[batch_id][node_id] == end_entity:
                     correct_nodes.append(node_id)
                     found_correct = True
@@ -554,7 +557,7 @@ class CogKR(nn.Module):
         self.agent.init(start_entities, query_representations=support_embeddings)
         # TODO: Normalize graph loss and entropy loss with time step
         graph_loss, entropy_loss = 0.0, 0.0
-        while True:
+        for _ in range(self.max_steps):
             currents, candidates = self.cog_graph.step()
             if sum(self.cog_graph.stop_states) == batch_size:
                 break
@@ -632,8 +635,8 @@ class CogKR(nn.Module):
                             node_id < len(self.cog_graph.node_lists[batch_id])]
                     results.append(result)
             else:
-                rank_scores = [[1] for _ in range(batch_size)]
+                rank_scores = [[1] * len(self.cog_graph.current_nodes[batch_id]) for batch_id in range(batch_size)]
                 results = []
                 for batch_id in range(batch_size):
-                    results.append([self.cog_graph.node_lists[batch_id][-1]])
+                    results.append(list(map(lambda x:self.cog_graph.node_lists[batch_id][x], self.cog_graph.current_nodes[batch_id])))
             return results, rank_scores
