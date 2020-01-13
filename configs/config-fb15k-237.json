@@ -7,7 +7,7 @@
     "max_nodes": 4,
     "max_neighbors": 1,
     "embed_size": 100,
-    "hidden_size": 200,
+    "hidden_size": 100,
     "topk": 1,
     "reward_policy": "direct",
     "baseline_lambda": 0.02,
