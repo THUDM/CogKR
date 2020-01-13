@@ -1,4 +1,5 @@
 import random, itertools
+import numpy as np
 from tqdm import tqdm
 from grapher import KG
 from torch.utils.data import BatchSampler, SequentialSampler, WeightedRandomSampler, RandomSampler
@@ -246,19 +247,27 @@ class Trainer:
                             (self.id2entity[start_entities[batch_id]], relation, self.id2entity[tail_entities[batch_id]]))] = \
                             reason_paths[batch_id]
                 for batch_id in range(len(batch)):
-                    for rollout_id in range(self.test_rollout_num):
-                        result, score = results[rollout_id * len(batch) + batch_id], scores[rollout_id * len(batch) + batch_id]
-                        for j in range(len(result)):
-                            entity_scores[batch_id][result[j]] += score[j]
-                    result = list(entity_scores[batch_id])
-                    result = sorted(result, key=entity_scores[batch_id].get, reverse=True)
+                    entities = [results[rollout_id * len(batch) + batch_id][0] for rollout_id in range(self.test_rollout_num)]
+                    score = [scores[rollout_id * len(batch) + batch_id][0] for rollout_id in range(self.test_rollout_num)]
+                    sorted_indx = np.argsort(-np.array(score))
+                    seen, result = set(), []
+                    for r in sorted_indx:
+                        if entities[r] not in seen and entities[r] != batch[batch_id][0]:
+                            result.append(entities[r])
+                            seen.add(entities[r])
+                    # for rollout_id in range(self.test_rollout_num):
+                    #     result, score = results[rollout_id * len(batch) + batch_id], scores[rollout_id * len(batch) + batch_id]
+                    #     for j in range(len(result)):
+                    #         entity_scores[batch_id][result[j]] += score[j]
+                    # result = list(entity_scores[batch_id])
+                    # result = sorted(result, key=entity_scores[batch_id].get, reverse=True)
                     if save_result:
                         save_result.write("\t".join([self.id2entity[start_entities[batch_id]], relation,
                                                     self.id2entity[batch[batch_id][1]]] + list(
                             map(lambda x: self.id2entity[x], result))) + "\n")
+                    result = list(filter(lambda x: x not in ground[batch_id] or x == batch[batch_id][1], result))
                     if relation_id in self.rel2candidate:
-                        result = list(
-                                filter(lambda x: (x in candidates and x not in ground[batch_id]) or x == batch[batch_id][1], result))
+                        result = list(filter(lambda x: x in candidates or x == batch[batch_id][1], result))
                     yield [batch[batch_id][1]], result                    
         if save_result:
             save_result.close()
