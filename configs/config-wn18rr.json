@@ -38,14 +38,14 @@
     "meta_learn": false,
     "sample_weight": 1.0,
     "rollout_num": 16,
-    "test_rollout_num": 64
+    "test_rollout_num": 100
   },
   "train": {
     "batch_size": 128,
     "test_batch_size": 64,
     "log_interval": 200,
-    "evaluate_interval": 10000,
-    "max_steps": 40000,
+    "evaluate_interval": 1000,
+    "max_steps": 10000,
     "entropy_beta": 0.05
   },
   "pretrain": {
