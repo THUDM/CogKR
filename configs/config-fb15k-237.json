@@ -4,10 +4,11 @@
     "test_width": 2000
   },
   "model": {
+    "max_steps": 3,
     "max_nodes": 4,
     "max_neighbors": 1,
     "embed_size": 100,
-    "hidden_size": 100,
+    "hidden_size": 200,
     "topk": 1,
     "reward_policy": "direct",
     "baseline_lambda": 0.02,
@@ -37,15 +38,15 @@
     "meta_learn": false,
     "sample_weight": 1.0,
     "rollout_num": 16,
-    "test_rollout_num": 64
+    "test_rollout_num": 100
   },
   "train": {
     "batch_size": 128,
     "test_batch_size": 64,
     "log_interval": 200,
-    "evaluate_interval": 10000,
-    "max_steps": 40000,
-    "entropy_beta": 1e-2
+    "evaluate_interval": 800,
+    "max_steps": 10000,
+    "entropy_beta": 0.02
   },
   "pretrain": {
     "batch_size": 64
