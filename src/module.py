@@ -103,12 +103,12 @@ class CogGraph:
         self.stop_states = [False for _ in range(self.batch_size)]
         self.frontier_queues = [deque([start_entity]) for start_entity in start_entities]
         self.node_lists = [[start_entity] for start_entity in start_entities]
-        self.antecedents = [[set()] for _ in range(self.batch_size)]
+        # self.antecedents = [[set()] for _ in range(self.batch_size)]
         self.entity2node = [{start_entity: 0} for start_entity in start_entities]
         self.entity_translate = torch.full((self.batch_size, len(self.entity_dict) + 1), fill_value=self.node_pad,
                                            dtype=torch.long)
         self.entity_translate[batch_index, start_entities] = 0
-        self.current_nodes = [set([0]) for _ in range(self.batch_size)]
+        self.current_nodes = [{0} for _ in range(self.batch_size)]
         if self.debug:
             self.debug_outputs = [io.StringIO() for _ in range(self.batch_size)]
 
@@ -139,7 +139,7 @@ class CogGraph:
             if len(self.node_lists[batch_id]) >= self.max_nodes or len(self.frontier_queues[batch_id]) == 0:
                 current_nodes.append(self.node_pad)
                 current_entities.append(self.entity_pad)
-                current_antecedents.append([])
+                # current_antecedents.append([])
                 self.stop_states[batch_id] = True
                 if self.debug:
                     self.debug_outputs[batch_id].write("search process stoped\n")
@@ -219,6 +219,7 @@ class CogGraph:
                 self.frontier_queues[batch_id].append(entity)
                 node_id = self.entity2node[batch_id][entity]
                 current_node.add(node_id)
+                # TODO rewrite the last edge if overflow
                 if neighbor_nums[batch_id][node_id] >= self.max_neighbors:
                     # node_ids.append(self.node_pos_pad)
                     # neighbor_ids.append(0)
@@ -573,6 +574,7 @@ class CogKR(nn.Module):
                 break
             final_scores, candidate_masks = self.agent.next_hop(currents, candidates)
             # Not use stop action
+            # TODO stop_action is removed now
             final_scores = final_scores[:, :-1]
             # use stochastic policy to sample actions
             m = torch.distributions.multinomial.Multinomial(total_count=self.topk, logits=final_scores)
