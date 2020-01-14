@@ -159,8 +159,7 @@ class CogGraph:
             batch_index.unsqueeze(-1).expand_as(candidate_entities), candidate_entities]
         self.states = (current_nodes, (candidate_nodes, candidate_entities, candidate_relations))
         # current_antecedents = list2tensor(current_antecedents, padding_idx=self.entity_pad, dtype=torch.long,
-                                        #   device=self.device).unsqueeze(
-            # 1)
+        #   device=self.device).unsqueeze(1)
         candidate_entities = candidate_entities.to(self.device)
         candidate_masks = candidate_masks.to(self.device)
         # candidate_masks &= ((candidate_entities.unsqueeze(-1) == current_antecedents).sum(dim=-1) == 0)
@@ -272,8 +271,7 @@ class Agent(nn.Module):
             query_size = hidden_size
         self.entity_embeddings = entity_embeddings
         self.relation_embeddings = relation_embeddings
-        self.hidden_layer = nn.Linear(embed_size, hidden_size)
-        self.pass_layer = nn.Linear(embed_size + hidden_size, hidden_size)
+        self.hiddenRNN = nn.GRUCell(input_size=2 * embed_size, hidden_size=hidden_size)
         self.pass_activation = nn.Sequential()
         self.update_activation = nn.LeakyReLU()
         self.nexthop_layer = nn.Linear(hidden_size + query_size + embed_size, hidden_size)
@@ -303,8 +301,7 @@ class Agent(nn.Module):
         else:
             self.query_representations = torch.zeros(self.batch_size, self.embed_size, dtype=torch.float,
                                                      device=self.entity_embeddings.weight.device)
-        init_embeddings = self.entity_embeddings(start_entities)
-        init_embeddings = self.update_activation(self.hidden_layer(init_embeddings))
+        init_embeddings = torch.zeros(self.batch_size, self.hidden_size, device=start_entities.device)
         self.node_embeddings[:, 0] = init_embeddings
         if self.debug:
             self.debug_outputs = [io.StringIO() for _ in range(self.batch_size)]
@@ -325,7 +322,7 @@ class Agent(nn.Module):
         # resize the neighbors to gather representations
         neighbor_nodes, neighbor_relations = neighbors[:, :, :, 0], neighbors[:, :, :, 1]
         # (batch_size, topk, embed_size) get the entity embeddings of aims to update
-        aim_embeddings = self.entity_embeddings(aims)
+        entity_embeddings = self.entity_embeddings(aims)
         # (batch_size, topk, max_neighbors, embed_size)
         # get the hidden representations and relation embeddings of neighbors
         node_embeddings = self.node_embeddings[batch_index.view(-1, 1, 1).expand_as(neighbor_nodes), neighbor_nodes]
@@ -334,19 +331,21 @@ class Agent(nn.Module):
         # node_embeddings = node_embeddings.view(batch_size, topk, max_neighbors, self.embed_size)
         # relation_embeddings = relation_embeddings.view(batch_size, topk, max_neighbors, self.embed_size)
         # (batch_size, topk, max_neighbors, 2 * embed_size) concatenated neighbor embeddings
-        neighbor_embeddings = torch.cat((node_embeddings, relation_embeddings), dim=-1)
-        neighbor_embeddings = self.pass_activation(self.pass_layer(neighbor_embeddings))
+        neighbor_embeddings = torch.cat((entity_embeddings.unsqueeze(2), relation_embeddings), dim=-1)
+        # neighbor_embeddings = self.pass_layer(neighbor_embeddings)
+        # updated_embeddings = self.hidden_layer(node_embeddings) + neighbor_embeddings
+        # updated_embeddings = self.update_activation(updated_embeddings)
+        updated_embeddings = self.hiddenRNN(neighbor_embeddings.reshape(batch_size * topk * max_neighbors, -1), node_embeddings.reshape(batch_size * topk * max_neighbors, -1))
+        updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, -1)
         # mask padding neighbors
         masks = torch.arange(0, max_neighbors, device=neighbor_embeddings.device).view(1, 1,
                                                                                        -1) >= neighbors_num.unsqueeze(
             -1)
-        neighbor_embeddings = neighbor_embeddings.masked_fill(masks.unsqueeze(-1), 0.0)
+        updated_embeddings = updated_embeddings.masked_fill(masks.unsqueeze(-1), 0.0)
         # avoid division by zeros here
         neighbors_num = neighbors_num.type(torch.float) + (neighbors_num == 0.0).type(torch.float)
-        neighbor_embeddings = neighbor_embeddings.sum(dim=2) / neighbors_num.unsqueeze(-1)
+        updated_embeddings = updated_embeddings.sum(dim=2) / neighbors_num.unsqueeze(-1)
         # apply layer normalization
-        updated_embeddings = self.hidden_layer(aim_embeddings) + neighbor_embeddings
-        updated_embeddings = self.update_activation(updated_embeddings)
         # write the updated embeddings
         self.node_embeddings[batch_index.unsqueeze(-1).expand_as(node_pos), node_pos] = updated_embeddings
 
@@ -632,7 +631,7 @@ class CogKR(nn.Module):
                 results = []
                 for batch_id in range(batch_size):
                     result = [self.cog_graph.node_lists[batch_id][node_id] for node_id in rank_index[batch_id] if
-                            node_id < len(self.cog_graph.node_lists[batch_id])]
+                    node_id < len(self.cog_graph.node_lists[batch_id])]
                     results.append(result)
             else:
                 rank_scores = [[1] * len(self.cog_graph.current_nodes[batch_id]) for batch_id in range(batch_size)]
