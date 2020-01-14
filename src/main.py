@@ -130,9 +130,13 @@ class Main:
 
     def build_env(self, graph_config, build_matrix=True):
         self.config['graph'] = graph_config
+        self_loop_id = None
+        if graph_config.get('add_self_loop', False):
+            self.relation_dict['SELF_LOOP'] = len(self.relation_dict)
+            self_loop_id = self.relation_dict['SELF_LOOP']
         self.reverse_relation = [self.relation_dict[inverse_relation(relation)] for relation in self.id2relation]
         self.kg = KG(self.facts_data, entity_num=len(self.entity_dict), relation_num=len(self.relation_dict),
-                     node_scores=self.pagerank, build_matrix=build_matrix, **graph_config)
+                     node_scores=self.pagerank, build_matrix=build_matrix, self_loop_id=self_loop_id, **graph_config)
         self.trainer = Trainer(self.kg, self.facts_data, reverse_relation=self.reverse_relation, cutoff=3,
                                train_graphs=self.train_graphs, validate_tasks=(self.valid_support, self.valid_eval),
                                test_tasks=(self.test_support, self.test_eval), evaluate_graphs=self.evaluate_graphs,
@@ -335,13 +339,13 @@ class Main:
         for self.batch_id in self.tqdm_wrapper(self.batch_sampler):
             if 'max_steps' in self.config['train'] and self.batch_id > self.config['train']['max_steps']:
                 break
-            support_pairs, query_heads, query_tails, relations, graphs = self.trainer.sample(
+            support_pairs, query_heads, query_tails, relations, other_correct_answers, graphs = self.trainer.sample(
                 self.config['train']['batch_size'])
             if meta_learn:
-                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, end_entities=query_tails,
+                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
                                                     support_pairs=support_pairs, evaluate=False)
             else:
-                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, end_entities=query_tails,
+                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
                                                     relations=relations, evaluate=False)
             self.optimizer.zero_grad()
             if self.sparse_embed:

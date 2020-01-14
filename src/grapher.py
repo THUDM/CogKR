@@ -19,8 +19,8 @@ def paths2graph(paths):
 class KG:
     """methods to process KB"""
 
-    def __init__(self, facts: list, entity_num: int, relation_num: int, node_scores: list = None, train_width=None,
-                 test_width=None, device=torch.device('cpu'), build_matrix=False):
+    def __init__(self, facts: list, entity_num: int, relation_num: int, self_loop_id=None, node_scores: list = None, train_width=None,
+                 test_width=None, device=torch.device('cpu'), build_matrix=False, add_self_loop=False):
         self.dataset = facts
         self.device = device
         self.train_width = train_width
@@ -39,12 +39,12 @@ class KG:
                 self.edge_data[head].sort(key=lambda x: self.node_scores[x[1]], reverse=True)
                 self.edge_data[head] = self.edge_data[head][:neighbor_limit]
         if build_matrix:
-            self.build_edge_matrix(mode='train')
+            self.build_edge_matrix(mode='train', add_self_loop=add_self_loop, self_loop_id=self_loop_id)
         self.ignore_relations = None
         self.ignore_edges = None
         self.ignore_relation_vectors = None
 
-    def build_edge_matrix(self, mode='train'):
+    def build_edge_matrix(self, mode='train', add_self_loop=False, self_loop_id=None):
         if mode == 'test':
             edge_data = [edges[:self.test_width] for edges in self.edge_data]
         else:
@@ -53,6 +53,9 @@ class KG:
                 edges[:limit] + random.sample(edges[limit:],
                                               self.train_width // 5) if len(
                     edges) > self.train_width else edges for edges in self.edge_data]
+        if add_self_loop:
+            for entity in range(len(edge_data)):
+                self.edge_data[entity].append((entity, entity, self_loop_id))
         self.edge_nums = torch.tensor(list(map(len, edge_data)), dtype=torch.long)
         edge_entities = [list(map(lambda x: x[1], edges)) for edges in edge_data]
         edge_relations = [list(map(lambda x: x[2], edges)) for edges in edge_data]
@@ -88,7 +91,7 @@ class KG:
                     masks[correct_batch] &= (
                             (edges[correct_batch] != ignore_edge_vector[1][correct_batch].unsqueeze(1)).sum(
                                 dim=2) != 0)
-        return edges, masks
+        return edges, masks, edge_nums
 
     def ignore_batch(self):
         if self.ignore_edges is not None:

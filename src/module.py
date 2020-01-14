@@ -86,9 +86,11 @@ class CogGraph:
         self.debug = False
         self.topk = topk
 
-    def init(self, start_entities: list, ground_graphs=None, evaluate=False):
+    def init(self, start_entities: list, other_correct_answers, ground_graphs=None, evaluate=False):
         self.evaluate = evaluate
         self.batch_size = len(start_entities)
+        # self.other_correct_answers = list2tensor(other_correct_answers, padding_idx=self.entity_pad, dtype=torch.long, device=self.device)
+        self.other_correct_answers = other_correct_answers
         batch_index = torch.arange(0, self.batch_size, dtype=torch.long)
         # each line is the head entity and relation type
         self.ground_graphs = ground_graphs
@@ -123,7 +125,7 @@ class CogGraph:
             graphs.append(graph)
         return graphs
 
-    def step(self):
+    def step(self, last_step=False):
         """
         :return ids of current entities (batch_size, )
                 candidates: node id (batch_size, max_neighbors, )
@@ -153,7 +155,7 @@ class CogGraph:
             #     current_antecedents.append(list(self.antecedents[batch_id][current_node]))
         current_nodes = torch.tensor(current_nodes, dtype=torch.long)
         current_entities = torch.tensor(current_entities, dtype=torch.long)
-        candidates, candidate_masks = self.graph.quick_edges(current_entities)
+        candidates, candidate_masks, candidate_nums = self.graph.quick_edges(current_entities)
         candidate_entities, candidate_relations = candidates[:, :, 0], candidates[:, :, 1]
         candidate_nodes = self.entity_translate[
             batch_index.unsqueeze(-1).expand_as(candidate_entities), candidate_entities]
@@ -162,6 +164,13 @@ class CogGraph:
         #   device=self.device).unsqueeze(1)
         candidate_entities = candidate_entities.to(self.device)
         candidate_masks = candidate_masks.to(self.device)
+        if last_step:
+            for batch_id in range(self.batch_size):
+                candidate_num = candidate_nums[batch_id].item()
+                for candidate_id in range(candidate_num):
+                    if candidate_entities[batch_id, candidate_id].item() in self.other_correct_answers[batch_id]:
+                        candidate_masks[batch_id, candidate_id] = 0
+            # candidate_masks &= ((candidate_entities.unsqueeze(-1) == self.other_correct_answers.unsqueeze(1)).sum(dim=-1) == 0)
         # candidate_masks &= ((candidate_entities.unsqueeze(-1) == current_antecedents).sum(dim=-1) == 0)
         return (current_nodes.to(self.device), current_entities.to(self.device)), (
             candidate_nodes.to(self.device), candidate_entities.to(self.device), candidate_relations.to(self.device),
@@ -209,12 +218,13 @@ class CogGraph:
                 # TODO should we revisit old nodes?
                 self.frontier_queues[batch_id].append(entity)
                 node_id = self.entity2node[batch_id][entity]
-                neighbor_num = neighbor_nums[batch_id][node_id]
                 current_node.add(node_id)
-                if neighbor_num >= self.max_neighbors:
-                    node_ids.append(self.node_pos_pad)
-                    neighbor_ids.append(0)
-                    continue
+                if neighbor_nums[batch_id][node_id] >= self.max_neighbors:
+                    # node_ids.append(self.node_pos_pad)
+                    # neighbor_ids.append(0)
+                    # continue
+                    neighbor_nums[batch_id][node_id] -= 1                   
+                neighbor_num = neighbor_nums[batch_id][node_id]
                 if self.debug:
                     relation = candidate_relations[batch_id, action_id].item()
                     self.debug_outputs[batch_id].write(
@@ -236,6 +246,7 @@ class CogGraph:
                                                                                      dtype=torch.long)
         self.neighbor_nums = torch.tensor(neighbor_nums, dtype=torch.long)
         # set the neighbor matrix of added nodes
+        # NO_OP will select the last relation, which is just the padding
         update_relations = candidate_relations[batch_index.unsqueeze(-1), actions]
         self.neighbor_matrix[batch_index.unsqueeze(-1), node_id_batch, neighbor_id_batch] = torch.stack(
             (currents.unsqueeze(-1).expand_as(update_relations), update_relations), dim=-1)
@@ -515,7 +526,7 @@ class CogKR(nn.Module):
                 reason_list[batch_id] = reason_paths
         return reason_list
 
-    def forward(self, start_entities: list, end_entities=None, ground_graphs=None, evaluate_graphs=None,
+    def forward(self, start_entities: list, other_correct_answers: list, end_entities=None, ground_graphs=None, evaluate_graphs=None,
                 support_pairs=None, relations=None, evaluate=False, candidates=None):
         batch_size = len(start_entities)
         device = self.entity_embeddings.weight.device
@@ -551,26 +562,28 @@ class CogKR(nn.Module):
                 labels = torch.ones(batch_size, 1000, dtype=torch.float, device=device)
                 rank_loss = self.loss(positive_scores, negative_scores, labels)
                 return torch.zeros(1, dtype=torch.float, device=device), rank_loss
-        self.cog_graph.init(start_entities, evaluate_graphs, evaluate=evaluate)
+        self.cog_graph.init(start_entities, other_correct_answers, evaluate_graphs, evaluate=evaluate)
         start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
         self.agent.init(start_entities, query_representations=support_embeddings)
         # TODO: Normalize graph loss and entropy loss with time step
         graph_loss, entropy_loss = 0.0, 0.0
-        for _ in range(self.max_steps):
-            currents, candidates = self.cog_graph.step()
+        for step in range(self.max_steps):
+            currents, candidates = self.cog_graph.step(step == self.max_steps - 1)
             if sum(self.cog_graph.stop_states) == batch_size:
                 break
             final_scores, candidate_masks = self.agent.next_hop(currents, candidates)
+            # Not use stop action
+            final_scores = final_scores[:, :-1]
             # use stochastic policy to sample actions
             m = torch.distributions.multinomial.Multinomial(total_count=self.topk, logits=final_scores)
             final_counts = m.sample()
-            action_counts = final_counts[:, :-1]
+            action_counts = final_counts
             action_counts, actions = action_counts.topk(k=min(self.topk, action_counts.size(1)), dim=-1)
             action_nums = (action_counts > 0).sum(dim=1)
+            log_prob = m.log_prob(final_counts) * (~torch.tensor(self.cog_graph.stop_states, device=device)).float()
+            graph_loss = log_prob + graph_loss
             if not evaluate:
                 # compute policy gradient here
-                log_prob = m.log_prob(final_counts) * (~torch.tensor(self.cog_graph.stop_states, device=device)).float()
-                graph_loss = log_prob + graph_loss
                 entropy = -(torch.softmax(final_scores, dim=-1) * nn.functional.log_softmax(final_scores, dim=-1)).sum(dim=-1).mean()
                 entropy_loss += entropy
             aims, neighbors = self.cog_graph.update(actions, action_nums)
@@ -634,7 +647,7 @@ class CogKR(nn.Module):
                     node_id < len(self.cog_graph.node_lists[batch_id])]
                     results.append(result)
             else:
-                rank_scores = [[1] * len(self.cog_graph.current_nodes[batch_id]) for batch_id in range(batch_size)]
+                rank_scores = graph_loss.unsqueeze(1).tolist()
                 results = []
                 for batch_id in range(batch_size):
                     results.append(list(map(lambda x:self.cog_graph.node_lists[batch_id][x], self.cog_graph.current_nodes[batch_id])))
