@@ -273,7 +273,7 @@ class CogGraph:
 
 class Agent(nn.Module):
     def __init__(self, entity_embeddings: nn.Embedding, relation_embeddings: nn.Embedding, max_nodes: int,
-                 embed_size: int, hidden_size: int, query_size: int = None):
+                 embed_size: int, hidden_size: int, query_size: int = None, use_rnn=True):
         nn.Module.__init__(self)
         self.embed_size = embed_size
         self.hidden_size = hidden_size
@@ -283,9 +283,14 @@ class Agent(nn.Module):
             query_size = hidden_size
         self.entity_embeddings = entity_embeddings
         self.relation_embeddings = relation_embeddings
-        self.hiddenRNN = nn.GRUCell(input_size=2 * embed_size, hidden_size=hidden_size)
-        self.pass_activation = nn.Sequential()
-        self.update_activation = nn.LeakyReLU()
+        self.use_rnn = use_rnn
+        if self.use_rnn:
+            self.hiddenRNN = nn.GRUCell(input_size=2 * embed_size, hidden_size=hidden_size)
+        else:
+            self.hidden_layer = nn.Linear(embed_size, hidden_size)
+            self.pass_layer = nn.Linear(embed_size + hidden_size, hidden_size)
+            self.pass_activation = nn.Sequential()
+            self.update_activation = nn.LeakyReLU()
         self.nexthop_layer = nn.Linear(hidden_size + query_size + embed_size, hidden_size)
         self.nexthop_activation = nn.LeakyReLU()
         self.candidate_layer = nn.Linear(2 * embed_size + hidden_size, hidden_size)
@@ -313,7 +318,11 @@ class Agent(nn.Module):
         else:
             self.query_representations = torch.zeros(self.batch_size, self.embed_size, dtype=torch.float,
                                                      device=self.entity_embeddings.weight.device)
-        init_embeddings = torch.zeros(self.batch_size, self.hidden_size, device=start_entities.device)
+        if self.use_rnn:
+            init_embeddings = torch.zeros(self.batch_size, self.hidden_size, device=start_entities.device)
+        else:
+            init_embeddings = self.entity_embeddings(start_entities)
+            init_embeddings = self.update_activation(self.hidden_layer(init_embeddings))
         self.node_embeddings[:, 0] = init_embeddings
         if self.debug:
             self.debug_outputs = [io.StringIO() for _ in range(self.batch_size)]
@@ -342,13 +351,18 @@ class Agent(nn.Module):
         # resize to get the correct embedding shapes
         # node_embeddings = node_embeddings.view(batch_size, topk, max_neighbors, self.embed_size)
         # relation_embeddings = relation_embeddings.view(batch_size, topk, max_neighbors, self.embed_size)
-        # (batch_size, topk, max_neighbors, 2 * embed_size) concatenated neighbor embeddings
-        neighbor_embeddings = torch.cat((entity_embeddings.unsqueeze(2), relation_embeddings), dim=-1)
-        # neighbor_embeddings = self.pass_layer(neighbor_embeddings)
-        # updated_embeddings = self.hidden_layer(node_embeddings) + neighbor_embeddings
-        # updated_embeddings = self.update_activation(updated_embeddings)
-        updated_embeddings = self.hiddenRNN(neighbor_embeddings.reshape(batch_size * topk * max_neighbors, -1), node_embeddings.reshape(batch_size * topk * max_neighbors, -1))
-        updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, -1)
+        if self.use_rnn:
+            # (batch_size, topk, max_neighbors, 2 * embed_size) concatenated neighbor embeddings
+            neighbor_embeddings = torch.cat((entity_embeddings.unsqueeze(2), relation_embeddings), dim=-1)
+            updated_embeddings = self.hiddenRNN(neighbor_embeddings.reshape(batch_size * topk * max_neighbors, -1),
+                                                node_embeddings.reshape(batch_size * topk * max_neighbors, -1))
+            updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, -1)
+        else:
+            # (batch_size, topk, max_neighbors, embed_size + hidden_size) concatenated neighbor embeddings
+            neighbor_embeddings = torch.cat((node_embeddings, relation_embeddings), dim=-1)
+            neighbor_embeddings = self.pass_activation(self.pass_layer(neighbor_embeddings))
+            updated_embeddings = self.hidden_layer(node_embeddings) + neighbor_embeddings
+            updated_embeddings = self.update_activation(updated_embeddings)
         # mask padding neighbors
         masks = torch.arange(0, max_neighbors, device=neighbor_embeddings.device).view(1, 1,
                                                                                        -1) >= neighbors_num.unsqueeze(
@@ -426,7 +440,7 @@ class Agent(nn.Module):
 class CogKR(nn.Module):
     def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int, max_neighbors: int,
                  embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0, onlyS=False,
-                 sparse_embed=False, use_rank=True, id2entity=None, id2relation=None):
+                 use_rnn=True, sparse_embed=False, use_rank=True, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
         self.entity_dict = entity_dict
@@ -456,7 +470,7 @@ class CogKR(nn.Module):
             query_size = embed_size
             print("Not use summary module")
         self.agent = Agent(self.entity_embeddings, self.relation_embeddings, self.max_nodes, self.embed_size,
-                           self.hidden_size, query_size=query_size)
+                           self.hidden_size, query_size=query_size, use_rnn=use_rnn)
         if self.onlyS:
             self.loss = nn.MarginRankingLoss(margin=1.0)
         else:
