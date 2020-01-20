@@ -104,7 +104,6 @@ class Trainer:
             # or use uniform sampler
             self.train_sampler = RandomSampler(range(len(self.train_relations)), num_samples=1, replacement=True)
 
-
     def check_rel2candidate(self, relations):
         hit = 0
         for relation in relations:

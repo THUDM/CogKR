@@ -8,10 +8,9 @@ from torch_utils import list2tensor
 import networkx
 from networkx.algorithms.shortest_paths.generic import shortest_path_length
 import math
-import random
+import numpy as np
 import io
 import pdb
-import statistics
 
 
 class Summary(nn.Module):
@@ -93,7 +92,7 @@ class CogGraph:
         self.evaluate = evaluate
         self.batch_size = len(start_entities)
         # self.other_correct_answers = list2tensor(other_correct_answers, padding_idx=self.entity_pad, dtype=torch.long, device=self.device)
-        self.other_correct_answers = other_correct_answers
+        self.other_correct_answers = [np.array(list(answer_set)) for answer_set in other_correct_answers]
         batch_index = torch.arange(0, self.batch_size, dtype=torch.long)
         # each line is the head entity and relation type
         self.ground_graphs = ground_graphs
@@ -147,21 +146,17 @@ class CogGraph:
         candidate_nodes = self.entity_translate[
             batch_index.unsqueeze(-1).unsqueeze(-1), candidate_entities]
         self.states = ((current_nodes, current_entities, current_masks), (candidate_nodes, candidate_entities, candidate_relations))
-        candidate_entities = candidate_entities.to(self.device)
-        candidate_masks = candidate_masks.to(self.device)
+        # candidate_entities = candidate_entities.to(self.device)
+        # candidate_masks = candidate_masks.to(self.device)
         if last_step:
             for batch_id in range(self.batch_size):
-                rollout_num = candidate_nums.size(1)
-                for rollout_id in range(rollout_num):
-                    candidate_num = candidate_nums[batch_id, rollout_id].item()
-                    for candidate_id in range(candidate_num):
-                        if candidate_entities[batch_id, rollout_id, candidate_id].item() in self.other_correct_answers[batch_id]:
-                            candidate_masks[batch_id, rollout_id, candidate_id] = 0
+                other_masks = np.isin(candidate_entities[batch_id].numpy(), self.other_correct_answers[batch_id], invert=True)
+                candidate_masks[batch_id] &= torch.from_numpy(other_masks).byte()
         return (current_nodes.to(self.device), current_entities.to(self.device), current_masks.to(self.device)), (
             candidate_nodes.to(self.device), candidate_entities.to(self.device), candidate_relations.to(self.device),
             candidate_masks.to(self.device))
 
-    def update(self, actions: torch.LongTensor, action_nums: torch.LongTensor, action_scores: torch.FloatTensor):
+    def update(self, actions: torch.LongTensor, action_nums: torch.LongTensor):
         """
         :param actions: batch_size, topk, each contains the next hop nodes of a current entity
         :param action_nums: batch_size
@@ -586,7 +581,7 @@ class CogKR(nn.Module):
             #     # compute policy gradient here
             #     entropy = -(torch.softmax(final_scores, dim=-1) * nn.functional.log_softmax(final_scores, dim=-1)).sum(dim=-1).mean()
             #     entropy_loss += entropy
-            aims, neighbors, current_entities = self.cog_graph.update(actions, action_nums, action_scores)
+            aims, neighbors, current_entities = self.cog_graph.update(actions, action_nums)
             action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
             attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1, dim_size=self.entity_num)
             attention /= attention.sum(dim=-1, keepdim=True)
