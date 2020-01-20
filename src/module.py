@@ -146,8 +146,6 @@ class CogGraph:
         candidate_nodes = self.entity_translate[
             batch_index.unsqueeze(-1).unsqueeze(-1), candidate_entities]
         self.states = ((current_nodes, current_entities, current_masks), (candidate_nodes, candidate_entities, candidate_relations))
-        # candidate_entities = candidate_entities.to(self.device)
-        # candidate_masks = candidate_masks.to(self.device)
         if last_step:
             for batch_id in range(self.batch_size):
                 other_masks = np.isin(candidate_entities[batch_id].numpy(), self.other_correct_answers[batch_id], invert=True)
@@ -575,30 +573,31 @@ class CogKR(nn.Module):
             attention_scores = attention[batch_index.unsqueeze(1), current_entities]
             final_scores = final_scores * attention_scores.unsqueeze(-1)
             final_scores = final_scores.reshape((batch_size, -1))
-            action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
-            action_nums = (action_scores > 1e-10).sum(dim=1)
-            # if not evaluate:
-            #     # compute policy gradient here
-            #     entropy = -(torch.softmax(final_scores, dim=-1) * nn.functional.log_softmax(final_scores, dim=-1)).sum(dim=-1).mean()
-            #     entropy_loss += entropy
-            aims, neighbors, current_entities = self.cog_graph.update(actions, action_nums)
-            action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
-            attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1, dim_size=self.entity_num)
-            attention /= attention.sum(dim=-1, keepdim=True)
-            self.agent.aggregate(aims, neighbors)
+            if step != self.max_steps - 1:
+                action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
+                action_nums = (action_scores > 1e-10).sum(dim=1)
+                action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
+                attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1, dim_size=self.entity_num)
+                attention /= attention.sum(dim=-1, keepdim=True)
+                aims, neighbors, current_entities = self.cog_graph.update(actions, action_nums)
+                self.agent.aggregate(aims, neighbors)
+            else:
+                attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)), dim=-1, dim_size=self.entity_num)
+                attention /= attention.sum(dim=-1, keepdim=True)
         if not evaluate:
             end_entities = torch.tensor(end_entities, dtype=torch.long, device=device)
-            correct_batch = (current_entities == end_entities.unsqueeze(-1)).sum(dim=-1) > 0
+            correct_batch = attention[batch_index, end_entities] > 1e-10
             self.reward = correct_batch.sum().item() / batch_size
             wrong_batch = batch_index[~correct_batch]
             correct_batch = batch_index[correct_batch]
             loss = -torch.log(attention[correct_batch, end_entities[correct_batch]]+1e-10).sum()
-            loss = loss - torch.log(1.01 - attention[wrong_batch.unsqueeze(-1), current_entities[wrong_batch]].sum(dim=-1)).sum()
+            loss = loss - torch.log(1.01 - attention[wrong_batch].sum(dim=-1)).sum()
             loss = loss / batch_size
             return loss
         else:
-            results = current_entities.tolist()
-            scores = attention[batch_index.unsqueeze(-1), current_entities].tolist()
+            scores, results = attention.topk(dim=-1, k=20)
+            results = results.tolist()
+            scores = scores.tolist()
             return results, scores
         # if self.statistician:
         #     self.statistics['graph_size'] += list(map(len, self.cog_graph.node_lists))
