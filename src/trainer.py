@@ -250,8 +250,8 @@ class Trainer:
                             (self.id2entity[start_entities[batch_id]], relation, self.id2entity[tail_entities[batch_id]]))] = \
                             reason_paths[batch_id]
                 for batch_id in range(len(batch)):
-                    entities = [results[rollout_id * len(batch) + batch_id][0] for rollout_id in range(self.test_rollout_num)]
-                    score = [scores[rollout_id * len(batch) + batch_id][0] for rollout_id in range(self.test_rollout_num)]
+                    entities = [entity for rollout_id in range(self.test_rollout_num) for entity in results[rollout_id * len(batch) + batch_id]]
+                    score = [score for rollout_id in range(self.test_rollout_num) for score in scores[rollout_id * len(batch) + batch_id]]
                     sorted_indx = np.argsort(-np.array(score))
                     seen, result = set(), []
                     for r in sorted_indx:

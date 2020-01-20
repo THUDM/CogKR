@@ -342,26 +342,24 @@ class Main:
             support_pairs, query_heads, query_tails, relations, other_correct_answers, graphs = self.trainer.sample(
                 self.config['train']['batch_size'])
             if meta_learn:
-                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
+                graph_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
                                                     support_pairs=support_pairs, evaluate=False)
             else:
-                graph_loss, rank_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
+                graph_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
                                                     relations=relations, evaluate=False)
             self.optimizer.zero_grad()
             if self.sparse_embed:
                 self.embed_optimizer.zero_grad()
-            (self.config['train'].get('graph_weight', 1.0) * graph_loss + rank_loss - self.entropy_beta * entropy_loss).backward()
+            graph_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.dense_parameters, 0.25, norm_type='inf')
             self.optimizer.step()
             if self.sparse_embed:
                 self.embed_optimizer.step()
-            if torch.isnan(graph_loss) or torch.isnan(rank_loss):
+            if torch.isnan(graph_loss) :
                 break
             else:
                 self.total_graph_loss += graph_loss.item()
-                self.total_rank_loss += rank_loss.item()
                 self.total_reward += self.cogKR.reward
-                self.total_graph_size += self.cogKR.graph_size
             if (self.batch_id + 1) % 200 == 0:
                 self.entropy_beta *= 0.9
                 print("Beta decay to: ", self.entropy_beta)
@@ -541,8 +539,9 @@ class Main:
 if __name__ == "__main__":
     from parse_args import args
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
-    device = torch.device('cuda:0')
+    # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    device = torch.device('cuda:{}'.format(args.gpu))
+    # device = torch.device("cpu")
     main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment,
                         relation_encode=args.relation_encode, tqdm_wrapper=tqdm)
     if args.config:

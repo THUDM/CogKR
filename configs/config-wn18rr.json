@@ -5,11 +5,11 @@
   },
   "model": {
     "max_steps": 3,
-    "max_nodes": 4,
-    "max_neighbors": 1,
+    "max_nodes": 50,
+    "max_neighbors": 5,
     "embed_size": 100,
     "hidden_size": 200,
-    "topk": 1,
+    "topk": 16,
     "reward_policy": "direct",
     "baseline_lambda": 0.05,
     "use_rank": false
@@ -37,14 +37,14 @@
     "ignore_relation": false,
     "meta_learn": false,
     "sample_weight": 1.0,
-    "rollout_num": 16,
-    "test_rollout_num": 100
+    "rollout_num": 1,
+    "test_rollout_num": 1
   },
   "train": {
-    "batch_size": 120,
+    "batch_size": 164,
     "test_batch_size": 64,
     "log_interval": 50,
-    "evaluate_interval": 200,
+    "evaluate_interval": 300,
     "max_steps": 10000,
     "entropy_beta": 0.05
   },

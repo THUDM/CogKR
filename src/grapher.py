@@ -3,6 +3,7 @@ from torch_utils import list2tensor
 import random
 import torch
 import networkx
+import pdb
 
 
 def paths2graph(paths):
@@ -71,17 +72,27 @@ class KG:
         return graph
 
     def quick_edges(self, sources):
+        batch_size, rollout_num = sources.size()
+        # batch_size, rollout_num, max_candidate
         edges = self.edge_matrix[sources]
+        # batch_size, rollout_num
         edge_nums = self.edge_nums[sources]
-        edges = edges[:, :torch.max(edge_nums)].long()
-        masks = torch.arange(0, edges.size(1)).unsqueeze(0) < edge_nums.unsqueeze(-1)
+        max_edges = torch.max(edge_nums)
+        edges = edges[:, :, :max_edges].long()
+        # batch_size, rollout_num, max_candidate
+        masks = torch.arange(0, edges.size(-2)).reshape((1, 1, -1)) < edge_nums.unsqueeze(-1)
         if self.ignore_edge_vectors is not None:
+            masks = masks.reshape((batch_size * rollout_num, max_edges.item()))
+            flat_edges = edges.reshape((batch_size * rollout_num, max_edges.item(), 2))
             for ignore_edge_vector in self.ignore_edge_vectors:
-                correct_batch = sources == ignore_edge_vector[0]
+                correct_batch = (sources == ignore_edge_vector[0].unsqueeze(1)).reshape(-1)
+                ignore_data = ignore_edge_vector[1].repeat(rollout_num, 1, 1).transpose(0, 1).reshape(
+                    batch_size * rollout_num, 2)
                 if correct_batch.any():
                     masks[correct_batch] &= (
-                            (edges[correct_batch] != ignore_edge_vector[1][correct_batch].unsqueeze(1)).sum(
+                            (flat_edges[correct_batch] != ignore_data[correct_batch].unsqueeze(1)).sum(
                                 dim=2) != 0)
+            masks = masks.reshape((batch_size, rollout_num, max_edges.item()))
         return edges, masks, edge_nums
 
     def ignore_batch(self):
