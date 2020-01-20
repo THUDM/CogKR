@@ -587,7 +587,7 @@ class CogKR(nn.Module):
         if not evaluate:
             end_entities = torch.tensor(end_entities, dtype=torch.long, device=device)
             correct_batch = attention[batch_index, end_entities] > 1e-10
-            self.reward = correct_batch.sum().item() / batch_size
+            self.reward = attention[batch_index, end_entities].sum().item() / batch_size
             wrong_batch = batch_index[~correct_batch]
             correct_batch = batch_index[correct_batch]
             loss = -torch.log(attention[correct_batch, end_entities[correct_batch]]+1e-10).sum()
