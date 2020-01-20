@@ -11,18 +11,18 @@ class Trainer:
     def __init__(self, graph: KG, train_facts, cutoff, reverse_relation: list, train_graphs: dict = None,
                  test_tasks=None, validate_tasks=None, evaluate_graphs: dict = None,
                  rel2candidate: dict = None, id2entity=None, id2relation=None, fact_dist=None,
-                 weighted_sample=True, ignore_relation=True, meta_learn=True, sample_weight=0.75, rollout_num=1, test_rollout_num=1):
+                 weighted_sample=True, ignore_onehop=False, meta_learn=True, sample_weight=0.75, rollout_num=1, test_rollout_num=1):
         self.graph = graph
         self.cutoff = cutoff
         self.reverse_relation = reverse_relation
-        self.ignore_relation = ignore_relation
+        self.ignore_onehop = ignore_onehop
         self.id2entity = id2entity
         self.id2relation = id2relation
         self.train_query, self.train_support = {}, {}
         self.meta_learn = meta_learn
         self.rollout_num = rollout_num
         self.test_rollout_num = test_rollout_num
-        print("Ignore relation: {}".format(ignore_relation))
+        print("Ignore onehop: {}".format(ignore_onehop))
         print("Sample weight:", sample_weight)
         # Note that we **do not** add reverse relations here
         self.e1rel2_e2 = {}
@@ -136,33 +136,33 @@ class Trainer:
 
     def sample(self, batch_size, specific_relation=None):
         self.graph.eval()
-        if self.ignore_relation:
-            self.graph.ignore_relations = []
-        else:
-            self.graph.ignore_edges = []
+        if self.ignore_onehop:
+            self.graph.ignore_pairs = []
+        self.graph.ignore_edges = []
         support_pairs, relations, query_heads, query_tails, other_correct_answers, graphs = [], [], [], [], [], []
         for _ in range(batch_size):
-            while True:
-                if specific_relation is not None:
-                    relation = specific_relation
-                else:
-                    relation = self.train_relations[next(iter(self.train_sampler))]
-                inv_relation = self.reverse_relation[relation]
-                if self.meta_learn:
-                    support_pair = random.choice(ListConcat(self.train_support[relation], self.train_query[relation]))
+            if specific_relation is not None:
+                relation = specific_relation
+            else:
+                relation = self.train_relations[next(iter(self.train_sampler))]
+            inv_relation = self.reverse_relation[relation]
+            if self.meta_learn:
+                support_pair = random.choice(ListConcat(self.train_support[relation], self.train_query[relation]))
+                query_pair = random.choice(self.train_query[relation])
+                while query_pair == support_pair:
                     query_pair = random.choice(self.train_query[relation])
-                    while query_pair == support_pair:
-                        query_pair = random.choice(self.train_query[relation])
-                    if self.train_graphs is None:
-                        graph = None
-                    else:
-                        graph = self.train_graphs.get((query_pair[0], relation, query_pair[1]))
-                else:
-                    query_pair = random.choice(self.train_query[relation])
+                if self.train_graphs is None:
                     graph = None
+                else:
+                    graph = self.train_graphs.get((query_pair[0], relation, query_pair[1]))
+            else:
+                query_pair = random.choice(self.train_query[relation])
+                graph = None
+            if self.ignore_onehop:
+                ignore_edges = ((query_pair[1], query_pair[0], inv_relation),)
+            else:
                 ignore_edges = ((query_pair[0], query_pair[1], relation),
                                 (query_pair[1], query_pair[0], inv_relation))
-                break
             ground = self.e1rel2_e2[(query_pair[0], relation)] - {query_pair[1]}
             relations += [relation] * self.rollout_num
             query_heads += [query_pair[0]] * self.rollout_num
@@ -172,6 +172,8 @@ class Trainer:
             if self.meta_learn:
                 support_pairs += [support_pair] * self.rollout_num
             self.graph.ignore_edges += [ignore_edges] * self.rollout_num
+            if self.ignore_onehop:
+                self.graph.ignore_pairs += [(query_pair[0], query_pair[1])] * self.rollout_num
         self.graph.ignore_batch()
         return support_pairs, query_heads, query_tails, relations, other_correct_answers, graphs
 

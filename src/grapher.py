@@ -1,9 +1,7 @@
 from collections import OrderedDict, deque, defaultdict
 from torch_utils import list2tensor
-import random
 import torch
 import networkx
-import pdb
 
 
 def paths2graph(paths):
@@ -43,6 +41,9 @@ class KG:
         self.ignore_relations = None
         self.ignore_edges = None
         self.ignore_relation_vectors = None
+        self.ignore_edge_vectors = None
+        self.ignore_pairs = None
+        self.ignore_pair_vectors = None
 
     def build_edge_matrix(self, add_self_loop=False, self_loop_id=None):
         if add_self_loop:
@@ -77,38 +78,45 @@ class KG:
         edges = self.edge_matrix[sources]
         # batch_size, rollout_num
         edge_nums = self.edge_nums[sources]
-        max_edges = torch.max(edge_nums)
+        max_edges = torch.max(edge_nums).item()
         edges = edges[:, :, :max_edges].long()
         # batch_size, rollout_num, max_candidate
         masks = torch.arange(0, edges.size(-2)).reshape((1, 1, -1)) < edge_nums.unsqueeze(-1)
-        if self.ignore_edge_vectors is not None:
-            masks = masks.reshape((batch_size * rollout_num, max_edges.item()))
-            flat_edges = edges.reshape((batch_size * rollout_num, max_edges.item(), 2))
-            for ignore_edge_vector in self.ignore_edge_vectors:
-                correct_batch = (sources == ignore_edge_vector[0].unsqueeze(1)).reshape(-1)
-                ignore_data = ignore_edge_vector[1].repeat(rollout_num, 1, 1).transpose(0, 1).reshape(
-                    batch_size * rollout_num, 2)
+        if self.ignore_edge_vectors is not None or self.ignore_pair_vectors is not None:
+            masks = masks.reshape((batch_size * rollout_num, max_edges))
+            flat_edges = edges.reshape((batch_size * rollout_num, max_edges, 2))
+            if self.ignore_edge_vectors is not None:
+                for ignore_edge_vector in self.ignore_edge_vectors:
+                    correct_batch = (sources == ignore_edge_vector[0].unsqueeze(1)).reshape(-1)
+                    ignore_data = ignore_edge_vector[1].repeat(rollout_num, 1, 1).transpose(0, 1).reshape(
+                        batch_size * rollout_num, 2)
+                    if correct_batch.any():
+                        masks[correct_batch] &= (
+                                (flat_edges[correct_batch] != ignore_data[correct_batch].unsqueeze(1)).sum(
+                                    dim=2) != 0)
+            if self.ignore_pair_vectors is not None:
+                correct_batch = (sources == self.ignore_pair_vectors[0].unsqueeze(1)).reshape(-1)
+                ignore_data = self.ignore_pair_vectors[1].repeat(rollout_num, 1).transpose(0, 1).reshape(batch_size * rollout_num)
                 if correct_batch.any():
-                    masks[correct_batch] &= (
-                            (flat_edges[correct_batch] != ignore_data[correct_batch].unsqueeze(1)).sum(
-                                dim=2) != 0)
-            masks = masks.reshape((batch_size, rollout_num, max_edges.item()))
-        return edges, masks, edge_nums
+                    masks[correct_batch] &= (flat_edges[correct_batch].select(-1, 0) != ignore_data[correct_batch].unsqueeze(1))
+            masks = masks.reshape((batch_size, rollout_num, max_edges))
+        return edges, masks
 
     def ignore_batch(self):
         if self.ignore_edges is not None:
-            self.ignore_edge_vectors = [(
-                torch.tensor(list(map(lambda x: x[0][0], self.ignore_edges)), dtype=torch.long, device=self.device),
-                torch.tensor(list(map(lambda x: (x[0][1], x[0][2]), self.ignore_edges)), dtype=torch.long,
-                             device=self.device)), (
-                torch.tensor(list(map(lambda x: x[1][0], self.ignore_edges)), dtype=torch.long, device=self.device),
-                torch.tensor(list(map(lambda x: (x[1][1], x[1][2]), self.ignore_edges)), dtype=torch.long,
-                             device=self.device))]
+            ignore_edge_vectors = torch.tensor(self.ignore_edges, dtype=torch.long, device=self.device)
+            edge_num = ignore_edge_vectors.size(1)
+            self.ignore_edge_vectors = [(ignore_edge_vectors[:, i, 0], ignore_edge_vectors[:, i, 1:]) for i in range(edge_num)]
         else:
             self.ignore_edge_vectors = None
+        if self.ignore_pairs is not None:
+            self.ignore_pair_vectors = (torch.tensor(list(map(lambda x:x[0], self.ignore_pairs)), dtype=torch.long, device=self.device),
+                                        torch.tensor(list(map(lambda x:x[1], self.ignore_pairs)), dtype=torch.long, device=self.device))
+        else:
+            self.ignore_pair_vectors = None
 
     def eval(self):
-        self.ignore_edges = self.ignore_relations = self.ignore_relation_vectors = self.ignore_edge_vectors = None
+        self.ignore_pairs = self.ignore_edges = self.ignore_relations = self.ignore_pair_vectors = self.ignore_relation_vectors = self.ignore_edge_vectors = None
 
     def edge_between(self, source, target):
         for edge in self.edge_data[source]:

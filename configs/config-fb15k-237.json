@@ -34,7 +34,7 @@
   },
   "trainer": {
     "weighted_sample": true,
-    "ignore_relation": false,
+    "ignore_onehop": true,
     "meta_learn": false,
     "sample_weight": 1.0,
     "rollout_num": 1,

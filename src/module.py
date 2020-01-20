@@ -141,7 +141,7 @@ class CogGraph:
         current_entities, current_masks = currents
         current_nodes = self.entity_translate[batch_index.unsqueeze(-1), current_entities]
         # TODO change KG.quick_edges
-        candidates, candidate_masks, candidate_nums = self.graph.quick_edges(current_entities.cpu())
+        candidates, candidate_masks = self.graph.quick_edges(current_entities.cpu())
         candidate_entities, candidate_relations = candidates.select(-1, 0), candidates.select(-1, 1)
         candidate_nodes = self.entity_translate[
             batch_index.unsqueeze(-1).unsqueeze(-1), candidate_entities]
