@@ -23,7 +23,6 @@ parser.add_argument('--load_state', type=str, default=None, help='specify the st
 parser.add_argument('--load_pretrain', type=str, default=None)
 parser.add_argument('--load_embed', type=str, default=None)
 
-parser.add_argument('--sparse_embed', action='store_true')
 parser.add_argument('--relation_encode', action='store_true')
 
 args = parser.parse_args()

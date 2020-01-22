@@ -551,7 +551,7 @@ if __name__ == "__main__":
                         relation_encode=args.relation_encode, tqdm_wrapper=tqdm)
     if args.config:
         main_body.config = unserialize(args.config)
-    main_body.sparse_embed = args.sparse_embed
+    main_body.sparse_embed = main_body.config.get('sparse_embed', False)
     main_body.load_data()
     main_body.build_env(main_body.config['graph'])
     if args.save_minerva:
@@ -624,5 +624,5 @@ if __name__ == "__main__":
                     print("Load Relation Embeddings from {}".format(relation_embed_path))
                     load_embedding(main_body.cogKR, entity_embed_path, relation_embed_path)
             with ExitStack() as stack:
-                stack.callback(main_body.save_state)
+                # stack.callback(main_body.save_state)
                 main_body.train()
