@@ -25,7 +25,7 @@ class Trainer:
         print("Ignore onehop: {}".format(ignore_onehop))
         print("Sample weight:", sample_weight)
         # Note that we **do not** add reverse relations here
-        self.e1rel2_e2 = {}
+        self.e1rel2_e2_test, self.e1rel2_e2_train = {}, {}
         for head, relation, tail in itertools.chain(train_facts):
             if relation not in self.train_query:
                 self.train_query[relation] = []
@@ -37,8 +37,10 @@ class Trainer:
                 self.train_query[relation].append(pair)
             else:
                 self.train_support[relation].append(pair)
-            self.e1rel2_e2.setdefault((head, relation), set())
-            self.e1rel2_e2[(head, relation)].add(tail)
+            self.e1rel2_e2_train.setdefault((head, relation), set())
+            self.e1rel2_e2_train[(head, relation)].add(tail)
+            self.e1rel2_e2_test.setdefault((head, relation), set())
+            self.e1rel2_e2_test[(head, relation)].add(tail)
         self.train_graphs = train_graphs
         self.task_ground, self.task_support = {}, {}
         # note we can't filter facts here
@@ -50,14 +52,16 @@ class Trainer:
                 self.task_support[relation] = (head, tail)
                 if not self.meta_learn:
                     self.train_query[relation] = [(head, tail)]
-                self.e1rel2_e2.setdefault((head, relation), set())
-                self.e1rel2_e2[(head, relation)].add(tail)
+                self.e1rel2_e2_train.setdefault((head, relation), set())
+                self.e1rel2_e2_train[(head, relation)].add(tail)
+                self.e1rel2_e2_test.setdefault((head, relation), set())
+                self.e1rel2_e2_test[(head, relation)].add(tail)
             for head, relation, tail in test_eval:
                 if relation in self.train_query and relation not in self.test_relations:
                     self.test_relations.append(relation)
                     self.task_support[relation] = None
-                self.e1rel2_e2.setdefault((head, relation), set())
-                self.e1rel2_e2[(head, relation)].add(tail)
+                self.e1rel2_e2_test.setdefault((head, relation), set())
+                self.e1rel2_e2_test[(head, relation)].add(tail)
                 self.task_ground.setdefault(relation, [])
                 self.task_ground[relation].append((head, tail))
         if validate_tasks is not None:
@@ -68,14 +72,16 @@ class Trainer:
                 self.task_support[relation] = (head, tail)
                 if not self.meta_learn:
                     self.train_query[relation] = [(head, tail)]
-                self.e1rel2_e2.setdefault((head, relation), set())
-                self.e1rel2_e2[(head, relation)].add(tail)
+                self.e1rel2_e2_train.setdefault((head, relation), set())
+                self.e1rel2_e2_train[(head, relation)].add(tail)
+                self.e1rel2_e2_test.setdefault((head, relation), set())
+                self.e1rel2_e2_test[(head, relation)].add(tail)
             for head, relation, tail in valid_eval:
                 if relation in self.train_query and relation not in self.validate_relations:
                     self.validate_relations.append(relation)
                     self.task_support[relation] = None
-                self.e1rel2_e2.setdefault((head, relation), set())
-                self.e1rel2_e2[(head, relation)].add(tail)
+                self.e1rel2_e2_test.setdefault((head, relation), set())
+                self.e1rel2_e2_test[(head, relation)].add(tail)
                 self.task_ground.setdefault(relation, [])
                 self.task_ground[relation].append((head, tail))
         self.rel2candidate = rel2candidate
@@ -91,7 +97,7 @@ class Trainer:
             test_hit = self.check_evaluate_graphs(self.test_relations)
             print("Test facts in evaluate graphs: {}".format(test_hit))
         self.train_relations = list(
-            filter(lambda x: len(self.train_query[x]) > 10 or x in self.test_relations or x in self.validate_relations,
+            filter(lambda x: len(self.train_query[x]) > 0 or x in self.test_relations or x in self.validate_relations,
                    self.train_query))
         print("Train relations: {}".format(len(self.train_relations)))
         self.pretrain_relations = list(
@@ -163,7 +169,7 @@ class Trainer:
             else:
                 ignore_edges = ((query_pair[0], query_pair[1], relation),
                                 (query_pair[1], query_pair[0], inv_relation))
-            ground = self.e1rel2_e2[(query_pair[0], relation)] - {query_pair[1]}
+            ground = self.e1rel2_e2_train[(query_pair[0], relation)] - {query_pair[1]}
             relations += [relation] * self.rollout_num
             query_heads += [query_pair[0]] * self.rollout_num
             query_tails += [query_pair[1]] * self.rollout_num
@@ -205,7 +211,7 @@ class Trainer:
         for relation in evaluate_relations:
             evaluate_facts = self.task_ground[relation]
             support_pair = self.task_support[relation]
-            ground_sets = [self.e1rel2_e2[(head, relation)] - {tail} for head, tail in evaluate_facts]
+            ground_sets = [self.e1rel2_e2_test[(head, relation)] - {tail} for head, tail in evaluate_facts]
             if use_graph and self.evaluate_graphs is not None:
                 evaluate_graphs = []
                 for head, tail in evaluate_facts:
