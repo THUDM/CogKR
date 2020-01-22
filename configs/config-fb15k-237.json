@@ -11,8 +11,7 @@
     "hidden_size": 200,
     "topk": 16,
     "reward_policy": "direct",
-    "baseline_lambda": 0.05,
-    "use_rank": false
+    "baseline_lambda": 0.05
   },
   "optimizer": {
     "name": "Adam",

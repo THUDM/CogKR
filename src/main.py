@@ -15,7 +15,6 @@ from utils import unserialize, serialize, inverse_relation, load_facts, load_ind
 from trainer import Trainer
 from module import CogKR, Summary
 from evaluation import hitRatio, MAP, multi_mean_measure, MRR
-from preprocess import Preprocess
 
 
 class Main:
@@ -112,7 +111,9 @@ class Main:
             self.train_graphs = unserialize(os.path.join(self.data_directory, "train_graphs"))
         else:
             self.train_graphs = None
-        if os.path.exists(os.path.join(self.data_directory, "evaluate_graphs")):
+        # if os.path.exists(os.path.join(self.data_directory, "evaluate_graphs")):
+        # TODO shouldn't use evaluate graphs anymore
+        if False:
             print("Use evaluate graphs")
             self.evaluate_graphs = unserialize(os.path.join(self.data_directory, "evaluate_graphs"))
         else:
@@ -542,6 +543,10 @@ if __name__ == "__main__":
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     device = torch.device('cuda:{}'.format(args.gpu))
     # device = torch.device("cpu")
+    torch.set_num_threads(10)
+    os.environ['MKL_NUM_THREADS'] = '10'
+    os.environ['NUMEXPR_NUM_THREADS'] = '10'
+    os.environ['OMP_NUM_THREADS'] = '10'
     main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment,
                         relation_encode=args.relation_encode, tqdm_wrapper=tqdm)
     if args.config:

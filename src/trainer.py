@@ -234,13 +234,12 @@ class Trainer:
                 start_entities = [data[0] for data in batch] * self.test_rollout_num
                 tail_entities = [data[1] for data in batch] * self.test_rollout_num
                 other_correct_answers = [item for item in ground] * self.test_rollout_num
-                entity_scores = [defaultdict(float) for _ in range(len(batch))]
                 if len(evaluate_graphs) > 0:
                     graphs = evaluate_graphs[0][idx[0]: idx[-1] + 1]
                 else:
                     graphs = None
                 if self.meta_learn:
-                    results, scores = module(start_entities, other_correct_answers=other_correct_answers, support_pairs=support_pair, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities))
+                    results, scores = module(start_entities, other_correct_answers=other_correct_answers, support_pairs=[support_pair], evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities))
                 else:
                     relations = [relation_id]
                     results, scores = module(start_entities, other_correct_answers=other_correct_answers, relations=relations, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities))

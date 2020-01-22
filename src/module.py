@@ -416,7 +416,7 @@ class Agent(nn.Module):
 class CogKR(nn.Module):
     def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int, max_neighbors: int,
                  embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0, onlyS=False,
-                 use_rnn=True, sparse_embed=False, use_rank=True, id2entity=None, id2relation=None):
+                 use_rnn=True, sparse_embed=False, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
         self.entity_dict = entity_dict
@@ -429,7 +429,6 @@ class CogKR(nn.Module):
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         self.onlyS = onlyS
-        self.use_rank = use_rank
         if hidden_size is None:
             self.hidden_size = embed_size
         self.topk = topk
@@ -599,67 +598,3 @@ class CogKR(nn.Module):
             results = results.tolist()
             scores = scores.tolist()
             return results, scores
-        # if self.statistician:
-        #     self.statistics['graph_size'] += list(map(len, self.cog_graph.node_lists))
-        # self.graph_size = statistics.mean(map(len, self.cog_graph.node_lists))
-        # if self.use_rank:
-        #     node_scores = self.agent.rank()
-        # if not evaluate:
-        #
-        #     correct_batch, correct_nodes = self.find_correct_tails(self.cog_graph.node_lists, end_entities, only_last=not self.use_rank)
-        #     if self.use_rank and len(correct_batch) > 0:
-        #         batch_index = torch.arange(len(correct_batch), device=device)
-        #         correct_batch = torch.tensor(correct_batch, dtype=torch.long, device=device)
-        #         correct_nodes = torch.tensor(correct_nodes, dtype=torch.long, device=device)
-        #         node_scores = node_scores[correct_batch]
-        #         node_nums = torch.tensor(list(map(len, self.cog_graph.node_lists)), dtype=torch.float,
-        #                                  device=device)[correct_batch]
-        #         masks = torch.arange(0, self.agent.max_nodes, dtype=torch.float, device=device).expand_as(
-        #             node_scores) >= node_nums.unsqueeze(-1)
-        #         node_scores.masked_fill_(masks, -1e6)
-        #         rank_loss = self.loss(node_scores, correct_nodes) / batch_size
-        #     else:
-        #         rank_loss = torch.zeros(1, device=device)
-        #     if self.reward_policy == 'ranking':
-        #         _, rank_index = torch.sort(node_scores, descending=True, dim=-1)
-        #         rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
-        #         if len(correct_batch) > 0:
-        #             rewards[correct_batch] = 1.0 / (rank_index[batch_index, correct_nodes] + 1).float()
-        #     elif self.reward_policy == 'predict':
-        #         rewards, _ = F.softmax(node_scores, dim=-1).max(dim=-1)
-        #     elif self.reward_policy == 'probability':
-        #         rewards = torch.full((batch_size,), -10, device=device, dtype=torch.float)
-        #         if len(correct_batch) > 0:
-        #             rewards[correct_batch] = torch.log(
-        #                 F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes] + 1e-10)
-        #     elif self.reward_policy == 'direct':
-        #         # directly use finding reward
-        #         rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
-        #         rewards[correct_batch] = 1.0
-        #     else:
-        #         raise NotImplementedError
-        #     self.reward = rewards.mean().item()
-        #     if self.baseline_lambda > 0.0:
-        #         self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
-        #             self.baseline_lambda * rewards.mean().item()
-        #         rewards -= self.reward_baseline
-        #     return rank_loss, entropy_loss
-        # else:
-        #     # delete the start entities
-        #     if self.use_rank:
-        #         node_scores[:, 0] = -1e5
-        #         node_scores = torch.softmax(node_scores, dim=-1)
-        #         rank_scores, rank_index = torch.sort(node_scores, descending=True, dim=-1)
-        #         rank_scores = rank_scores.tolist()
-        #         rank_index = rank_index.tolist()
-        #         results = []
-        #         for batch_id in range(batch_size):
-        #             result = [self.cog_graph.node_lists[batch_id][node_id] for node_id in rank_index[batch_id] if
-        #             node_id < len(self.cog_graph.node_lists[batch_id])]
-        #             results.append(result)
-        #     else:
-        #         rank_scores = graph_loss.unsqueeze(1).tolist()
-        #         results = []
-        #         for batch_id in range(batch_size):
-        #             results.append(list(map(lambda x:self.cog_graph.node_lists[batch_id][x], self.cog_graph.current_nodes[batch_id])))
-        #     return results, rank_scores

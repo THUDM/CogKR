@@ -142,6 +142,8 @@ class KG:
                 ignore_edges = self.ignore_edges
         if ignore_relations is None:
             ignore_relations = []
+        if ignore_edges is None:
+            ignore_edges = []
         edges = self.edge_data[source]
         if ignore_relations is None:
             for edge in edges:
