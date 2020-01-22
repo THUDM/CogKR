@@ -34,8 +34,8 @@
   "trainer": {
     "weighted_sample": true,
     "ignore_onehop": false,
-    "meta_learn": true,
-    "sample_weight": 0.75,
+    "meta_learn": false,
+    "sample_weight": 0.2,
     "rollout_num": 1,
     "test_rollout_num": 1
   },
@@ -50,5 +50,5 @@
   "pretrain": {
     "batch_size": 64
   },
-   "sparse_embed": true
+  "sparse_embed": true
 }
