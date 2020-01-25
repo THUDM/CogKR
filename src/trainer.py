@@ -96,8 +96,12 @@ class Trainer:
             print("Validate facts in evaluate graphs: {}".format(valid_hit))
             test_hit = self.check_evaluate_graphs(self.test_relations)
             print("Test facts in evaluate graphs: {}".format(test_hit))
+        if self.meta_learn:
+            min_fact = 2
+        else:
+            min_fact = 0
         self.train_relations = list(
-            filter(lambda x: len(self.train_query[x]) > 0 or x in self.test_relations or x in self.validate_relations,
+            filter(lambda x: len(self.train_query[x]) >= min_fact or x in self.test_relations or x in self.validate_relations,
                    self.train_query))
         print("Train relations: {}".format(len(self.train_relations)))
         self.pretrain_relations = list(
