@@ -2,29 +2,28 @@ import os, itertools, functools, time
 import torch
 import torch.nn as nn
 import networkx
+import logging
 from networkx.algorithms.shortest_paths.generic import shortest_path_length
 from networkx import NetworkXNoPath, NetworkXError
 from collections import defaultdict
-from tqdm import tqdm, tqdm_notebook
+import tqdm
 from tensorboardX import SummaryWriter
 from contextlib import ExitStack
 
 from grapher import KG
 from torch_utils import load_embedding
-from utils import unserialize, serialize, inverse_relation, load_facts, load_index, translate_facts, add_reverse_relations
+from utils import unserialize, serialize, inverse_relation, load_facts, load_index, translate_facts, add_reverse_relations, TqdmLoggingHandler
 from trainer import Trainer
 from module import CogKR, Summary
 from evaluation import hitRatio, MAP, multi_mean_measure, MRR
 
 
 class Main:
-    def __init__(self, args, root_directory, device=torch.device("cpu"), comment="", sparse_embed=False,
-                 relation_encode=False, tqdm_wrapper=tqdm_notebook):
+    def __init__(self, args, root_directory, device=torch.device("cpu"), comment="", sparse_embed=False):
         self.args = args
         self.root_directory = root_directory
         self.comment = comment
         self.device = device
-        self.tqdm_wrapper = tqdm_wrapper
         self.config = {
             'graph': {
                 'train_width': 256,
@@ -62,15 +61,14 @@ class Main:
                 'keep_embed': False
             }}
         self.measure_dict = {
-            'Hit@1': functools.partial(hitRatio, topn=1),
-            'Hit@3': functools.partial(hitRatio, topn=3),
-            'Hit@5': functools.partial(hitRatio, topn=5),
-            'Hit@10': functools.partial(hitRatio, topn=10),
+            'Hit1': functools.partial(hitRatio, topn=1),
+            'Hit3': functools.partial(hitRatio, topn=3),
+            'Hit5': functools.partial(hitRatio, topn=5),
+            'Hit10': functools.partial(hitRatio, topn=10),
             'hitRatio': hitRatio,
             'MAP': MAP
         }
         self.sparse_embed = sparse_embed
-        self.relation_encode = relation_encode
         self.best_results = {}
         self.data_loaded = False
         self.env_built = False
@@ -113,12 +111,13 @@ class Main:
             self.train_graphs = None
         # if os.path.exists(os.path.join(self.data_directory, "evaluate_graphs")):
         # TODO shouldn't use evaluate graphs anymore
-        if False:
-            print("Use evaluate graphs")
-            self.evaluate_graphs = unserialize(os.path.join(self.data_directory, "evaluate_graphs"))
-        else:
-            print("Warning: Can't find evaluate graphs")
-            self.evaluate_graphs = None
+        # if False:
+        #     print("Use evaluate graphs")
+        #     self.evaluate_graphs = unserialize(os.path.join(self.data_directory, "evaluate_graphs"))
+        # else:
+        #     print("Warning: Can't find evaluate graphs")
+        #     self.evaluate_graphs = None
+        self.evaluate_graphs = None
         if os.path.exists(os.path.join(self.data_directory, "rel2candidates")):
             self.rel2candidate = unserialize(os.path.join(self.data_directory, "rel2candidates"))
         else:
@@ -288,8 +287,7 @@ class Main:
     def build_logger(self, log_directory=None, batch_id=None):
         self.log_directory = log_directory
         if self.log_directory is None:
-            self.log_directory = os.path.join(self.root_directory, "log",
-                                              "-".join((time.strftime("%m-%d-%H"), self.comment)))
+            self.log_directory = os.path.join(self.root_directory, "log", "{}-{}-{}-{}".format(time.strftime("%m-%d-%H"), self.config['model']['topk'], self.config['model']['reward_policy'], self.comment))
             if not os.path.exists(self.log_directory):
                 os.makedirs(self.log_directory)
             serialize(self.config, os.path.join(self.log_directory, 'config.json'), in_json=True)
@@ -300,6 +298,15 @@ class Main:
         else:
             self.writer = SummaryWriter(self.log_file, purge_step=batch_id)
             self.batch_sampler = itertools.count(start=batch_id)
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging.INFO)
+        self.logger.addHandler(TqdmLoggingHandler())
+        logfile = os.path.join(self.log_directory, "log.txt")
+        if batch_id is None:
+            logfile = logging.FileHandler(logfile, "w")
+        else:
+            logfile = logging.FileHandler(logfile, "a")
+        self.logger.addHandler(logfile)
 
     def pretrain(self, single_step=False):
         for batch_id in tqdm(self.batch_sampler):
@@ -314,7 +321,7 @@ class Main:
 
             self.predict_loss += loss.item()
             if (batch_id + 1) % self.config['pretrain'].get('log_interval', 1000) == 0:
-                print(self.predict_loss)
+                self.logger.info("predict loss: {}".format(self.predict_loss))
                 self.writer.add_scalar('predict_loss', self.predict_loss / 1000, batch_id)
                 self.predict_loss = 0.0
             if (batch_id + 1) % self.config['pretrain'].get('evaluate_interval', 10000) == 0:
@@ -329,15 +336,15 @@ class Main:
         self.writer.add_scalar('rank_loss', self.total_rank_loss / interval, self.batch_id)
         self.writer.add_scalar('reward', self.total_reward / interval, self.batch_id)
         self.writer.add_scalar('graph_size', self.total_graph_size / interval, self.batch_id)
-        print(self.total_graph_loss, self.total_rank_loss, self.total_reward / interval)
+        self.logger.info("Loss: {}, Reward: {}".format(self.total_graph_loss, self.total_reward / interval))
         self.total_graph_loss, self.total_rank_loss = 0.0, 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
 
     def train(self, single_step=False):
         meta_learn = self.config.get('trainer', {}).get('meta_learn', True)
         validate_metric = self.config.get('train', {}).get('validate_metric', 'MAP')
-        print('Graph loss weight:', self.config['train'].get('graph_weight', 1.0))
-        for self.batch_id in self.tqdm_wrapper(self.batch_sampler):
+        # self.logger.info('Graph loss weight: {}'.format(self.config['train'].get('graph_weight', 1.0)))
+        for self.batch_id in tqdm.tqdm(self.batch_sampler):
             if 'max_steps' in self.config['train'] and self.batch_id > self.config['train']['max_steps']:
                 break
             support_pairs, query_heads, query_tails, relations, other_correct_answers, graphs = self.trainer.sample(
@@ -363,20 +370,20 @@ class Main:
                 self.total_reward += self.cogKR.reward
             if (self.batch_id + 1) % 200 == 0:
                 self.entropy_beta *= 0.9
-                print("Beta decay to: ", self.entropy_beta)
+                self.logger.info("Beta decay to: {}".format(self.entropy_beta))
             if (self.batch_id + 1) % self.config['train']['log_interval'] == 0:
                 self.log()
             if (self.batch_id + 1) % self.config['train']['evaluate_interval'] == 0:
                 with torch.no_grad():
                     test_results = self.evaluate_model(mode='test')
                     validate_results = self.evaluate_model(mode='valid')
-                    print("Validate results:", validate_results)
+                    self.logger.info("Validate results: {}".format(validate_results))
                     update = False
                     for key, value in test_results.items():
                         self.writer.add_scalar(key, value, self.batch_id)
                     if validate_metric not in self.best_results or validate_results[validate_metric] >= self.best_results[
                         validate_metric]:
-                        print("Test results:", test_results)
+                        self.logger.info("Test results: {}".format(test_results))
                         self.save_state(is_best=True)
                     for key, value in validate_results.items():
                         if key not in self.best_results or value > self.best_results[key]:
@@ -388,7 +395,7 @@ class Main:
     def get_fact_dist(self, ignore_relation=True):
         graph = self.kg.to_networkx(multi=True, neighbor_limit=256)
         fact_dist = {}
-        for relation, pairs in tqdm(self.trainer.train_query.items()):
+        for relation, pairs in tqdm.tqdm(self.trainer.train_query.items()):
             deleted_edges = []
             if ignore_relation:
                 reverse_relation = self.reverse_relation[relation]
@@ -538,8 +545,8 @@ class Main:
 
 
 if __name__ == "__main__":
+    # Parse arguments
     from parse_args import args
-
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     device = torch.device('cuda:{}'.format(args.gpu))
     # device = torch.device("cpu")
@@ -547,8 +554,7 @@ if __name__ == "__main__":
     os.environ['MKL_NUM_THREADS'] = '10'
     os.environ['NUMEXPR_NUM_THREADS'] = '10'
     os.environ['OMP_NUM_THREADS'] = '10'
-    main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment,
-                        relation_encode=args.relation_encode, tqdm_wrapper=tqdm)
+    main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment)
     if args.config:
         main_body.config = unserialize(args.config)
     main_body.sparse_embed = main_body.config.get('sparse_embed', False)
@@ -620,8 +626,8 @@ if __name__ == "__main__":
                                                         ".".join(('entity2vec', args.load_embed)))
                     relation_embed_path = os.path.join(args.directory, "data",
                                                         ".".join(('relation2vec', args.load_embed)))
-                    print("Load Entity Embeddings from {}".format(entity_embed_path))
-                    print("Load Relation Embeddings from {}".format(relation_embed_path))
+                    main_body.logger.info("Load Entity Embeddings from {}".format(entity_embed_path))
+                    main_body.logger.info("Load Relation Embeddings from {}".format(relation_embed_path))
                     load_embedding(main_body.cogKR, entity_embed_path, relation_embed_path)
             with ExitStack() as stack:
                 # stack.callback(main_body.save_state)
