@@ -350,15 +350,15 @@ class Main:
             support_pairs, query_heads, query_tails, relations, other_correct_answers, graphs = self.trainer.sample(
                 self.config['train']['batch_size'])
             if meta_learn:
-                graph_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
+                graph_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
                                                     support_pairs=support_pairs, evaluate=False)
             else:
-                graph_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
+                graph_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
                                                     relations=relations, evaluate=False)
             self.optimizer.zero_grad()
             if self.sparse_embed:
                 self.embed_optimizer.zero_grad()
-            graph_loss.backward()
+            (graph_loss - self.entropy_beta * entropy_loss).backward()
             torch.nn.utils.clip_grad_norm_(self.dense_parameters, 0.25, norm_type='inf')
             self.optimizer.step()
             if self.sparse_embed:

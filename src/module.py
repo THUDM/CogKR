@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.distributions
 import torch_scatter
 import grapher
 from collections import deque
@@ -233,7 +233,9 @@ class CogGraph:
             (update_nodes, update_relations), dim=-1)
         aggregate_nodes = [list(map(self.entity2node[batch_id].get, aggregate_entities[batch_id])) for batch_id in
                      range(self.batch_size)]
+        attend_nums = torch.tensor(list(map(len, attend_entities)), dtype=torch.long, device=self.device)
         attend_entities = list2tensor(attend_entities, padding_idx=self.entity_pad, dtype=torch.long, device=self.device)
+        attend_masks = torch.arange(attend_entities.size(-1), device=self.device).unsqueeze(0) < attend_nums.unsqueeze(-1)
         aggregate_nodes = list2tensor(aggregate_nodes, padding_idx=self.node_pos_pad, dtype=torch.long, device=self.device)
         aggregate_nums = torch.tensor(list(map(len, aggregate_entities)), dtype=torch.long, device=self.device)
         aggregate_entities = list2tensor(aggregate_entities, dtype=torch.long, device=self.device, padding_idx=self.entity_pad)
@@ -249,7 +251,7 @@ class CogGraph:
                     self.debug_outputs[batch_id].write("Node: {} ".format(aggregate_entity))
                     self.debug_outputs[batch_id].write(
                         str(self.neighbor_matrix[batch_id, aggregate_entity, :neighbors_num[batch_id, i]].tolist()) + "\n")
-        return (aggregate_nodes, aggregate_entities, aggregate_nums), (neighbors, neighbors_num), attend_entities
+        return (aggregate_nodes, aggregate_entities, aggregate_nums), (neighbors, neighbors_num), (attend_entities, attend_masks)
 
 
 class Agent(nn.Module):
@@ -559,9 +561,11 @@ class CogKR(nn.Module):
         start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
         self.agent.init(start_entities, query_representations=support_embeddings)
         # TODO: Normalize graph loss and entropy loss with time step
-        entropy_loss = 0.0
-        attention = torch.zeros(batch_size, self.entity_num, device=device)
-        attention[batch_index, start_entities] = 1
+        if self.reward_policy == 'direct':
+            attention = torch.zeros(batch_size, self.entity_num, device=device)
+            attention[batch_index, start_entities] = 1
+        else:
+            graph_loss, entropy_loss = 0.0, 0.0
         current_entities = start_entities.unsqueeze(1)
         current_masks = torch.ones(batch_size, 1, dtype=torch.uint8, device=device)
         for step in range(self.max_steps):
@@ -569,32 +573,73 @@ class CogKR(nn.Module):
             candidate_nodes, candidate_entities, candidate_relations, candidate_masks = candidates
             final_scores = self.agent.next_hop(currents, candidates)
             final_scores = torch.softmax(final_scores, dim=-1)
-            attention_scores = attention[batch_index.unsqueeze(1), current_entities]
-            final_scores = final_scores * attention_scores.unsqueeze(-1)
-            final_scores = final_scores.reshape((batch_size, -1))
-            if step != self.max_steps - 1:
-                action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
-                action_nums = (action_scores > 1e-10).sum(dim=1)
-                action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
-                attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1, dim_size=self.entity_num)
-                attention /= attention.sum(dim=-1, keepdim=True)
-                aims, neighbors, current_entities = self.cog_graph.update(actions, action_nums)
+            if self.reward_policy == 'direct':
+                attention_scores = attention[batch_index.unsqueeze(1), current_entities]
+                final_scores = final_scores * attention_scores.unsqueeze(-1)
+                final_scores = final_scores.reshape((batch_size, -1))
+                if step != self.max_steps - 1:
+                    action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
+                    action_nums = (action_scores > 1e-10).sum(dim=1)
+                    action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
+                    attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1, dim_size=self.entity_num)
+                    attention /= attention.sum(dim=-1, keepdim=True)
+                    aims, neighbors, currents = self.cog_graph.update(actions, action_nums)
+                    current_entities, current_masks = currents
+                    self.agent.aggregate(aims, neighbors)
+                else:
+                    attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)), dim=-1, dim_size=self.entity_num)
+                    attention /= attention.sum(dim=-1, keepdim=True)
+            elif self.reward_policy == 'stochastic':
+                if not evaluate:
+                    entropy = -(final_scores * torch.log(final_scores + 1e-10)).sum(dim=-1).mean()
+                    entropy_loss += entropy
+                final_scores = final_scores.masked_fill(~current_masks.unsqueeze(-1), 0.0)
+                final_scores = final_scores.reshape((batch_size, -1))
+                m = torch.distributions.multinomial.Multinomial(total_count=self.topk, probs=final_scores)
+                action_counts = m.sample()
+                log_prob = m.log_prob(action_counts)
+                graph_loss = graph_loss + log_prob
+                actions = torch.argsort(action_counts, dim=-1, descending=True)
+                action_nums = (action_counts > 0).sum(dim=1)
+                actions = actions[:, :torch.max(action_nums)]
+                aims, neighbors, currents = self.cog_graph.update(actions, action_nums)
+                current_entities, current_masks = currents
                 self.agent.aggregate(aims, neighbors)
             else:
-                attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)), dim=-1, dim_size=self.entity_num)
-                attention /= attention.sum(dim=-1, keepdim=True)
+                raise NotImplemented
         if not evaluate:
-            end_entities = torch.tensor(end_entities, dtype=torch.long, device=device)
-            correct_batch = attention[batch_index, end_entities] > 1e-10
-            self.reward = attention[batch_index, end_entities].sum().item() / batch_size
-            wrong_batch = batch_index[~correct_batch]
-            correct_batch = batch_index[correct_batch]
-            loss = -torch.log(attention[correct_batch, end_entities[correct_batch]]+1e-10).sum()
-            loss = loss - torch.log(1.01 - attention[wrong_batch].sum(dim=-1)).sum()
-            loss = loss / batch_size
-            return loss
+            if self.reward_policy == 'direct':
+                end_entities = torch.tensor(end_entities, dtype=torch.long, device=device)
+                correct_batch = attention[batch_index, end_entities] > 1e-10
+                self.reward = attention[batch_index, end_entities].sum().item() / batch_size
+                wrong_batch = batch_index[~correct_batch]
+                correct_batch = batch_index[correct_batch]
+                loss = -torch.log(attention[correct_batch, end_entities[correct_batch]]+1e-10).sum()
+                loss = loss - torch.log(1.01 - attention[wrong_batch].sum(dim=-1)).sum()
+                loss = loss / batch_size
+                return loss, 0.0
+            elif self.reward_policy == 'stochastic':
+                end_entities = torch.tensor(end_entities, dtype=torch.long, device=device)
+                rewards = (current_entities == end_entities.unsqueeze(-1)).any(dim=-1).float()
+                rewards /= current_masks.float().sum(dim=-1) + 1e-10
+                self.reward = rewards.mean().item()
+                if self.baseline_lambda > 0.0:
+                    self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
+                                           self.baseline_lambda * rewards.mean().item()
+                    rewards -= self.reward_baseline
+                graph_loss = (- rewards.detach() * graph_loss).mean()
+                return graph_loss, entropy_loss
+            else:
+                raise NotImplemented
         else:
-            scores, results = attention.topk(dim=-1, k=20)
-            results = results.tolist()
-            scores = scores.tolist()
-            return results, scores
+            if self.reward_policy == 'direct':
+                scores, results = attention.topk(dim=-1, k=20)
+                results = results.tolist()
+                scores = scores.tolist()
+                return results, scores
+            elif self.reward_policy == 'stochastic':
+                results = current_entities.tolist()
+                scores = graph_loss.unsqueeze(-1).expand_as(current_entities).tolist()
+                return results, scores
+            else:
+                raise NotImplemented
