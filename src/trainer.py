@@ -249,12 +249,16 @@ class Trainer:
                 else:
                     graphs = None
                 if self.meta_learn:
-                    results, scores = module(start_entities, other_correct_answers=other_correct_answers, support_pairs=[support_pair], evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities))
+                    results, scores = module(start_entities, other_correct_answers=other_correct_answers,
+                                             support_pairs=[support_pair], evaluate=True, evaluate_graphs=graphs,
+                                             candidates=candidates | set(tail_entities), end_entities=tail_entities)
                 else:
                     relations = [relation_id]
-                    results, scores = module(start_entities, other_correct_answers=other_correct_answers, relations=relations, evaluate=True, evaluate_graphs=graphs, candidates=candidates | set(tail_entities))
+                    results, scores = module(start_entities, other_correct_answers=other_correct_answers,
+                                             relations=relations, evaluate=True, evaluate_graphs=graphs,
+                                             candidates=candidates | set(tail_entities), end_entities=tail_entities)
                 if save_graph:
-                    reason_paths = module.get_correct_path(relation_id, tail_entities, return_graph=True)
+                    reason_paths = module.get_correct_path(tail_entities, return_graph=True)
                     for batch_id in range(len(batch)):
                         self.reason_graphs["\t".join(
                             (self.id2entity[start_entities[batch_id]], relation, self.id2entity[tail_entities[batch_id]]))] = \

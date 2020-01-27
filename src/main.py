@@ -598,8 +598,8 @@ if __name__ == "__main__":
                 if args.load_state:
                     main_body.load_state(args.load_state, train=False)
                 print("Evaluate on valid data")
-                results = main_body.evaluate_model(mode='valid')
-                print(results)
+                # results = main_body.evaluate_model(mode='valid')
+                # print(results)
                 print("Evaluate on test data")
                 if args.save_result:
                     save_result = os.path.join(os.path.dirname(args.load_state), args.save_result)

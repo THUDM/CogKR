@@ -227,8 +227,8 @@ class CogGraph:
         self.neighbor_nums = torch.tensor(neighbor_nums, dtype=torch.long)
         # set the neighbor matrix of added nodes
         # NO_OP will select the last relation, which is just the padding
-        update_nodes = candidate_nodes[batch_index.unsqueeze(-1), rollout_ids, candidate_ids]
         update_relations = candidate_relations[batch_index.unsqueeze(-1), rollout_ids, candidate_ids]
+        update_nodes = current_nodes[batch_index.unsqueeze(-1), rollout_ids]
         self.neighbor_matrix[batch_index.unsqueeze(-1), node_id_batch, neighbor_id_batch] = torch.stack(
             (update_nodes, update_relations), dim=-1)
         aggregate_nodes = [list(map(self.entity2node[batch_id].get, aggregate_entities[batch_id])) for batch_id in
@@ -483,7 +483,7 @@ class CogKR(nn.Module):
                 correct_batch.append(batch_id)
         return correct_batch, correct_nodes
 
-    def get_correct_path(self, relations, correct_tails, verbose=False, return_graph=False):
+    def get_correct_path(self, correct_tails, return_graph=False):
         correct_batch, correct_nodes = self.find_correct_tails(self.cog_graph.node_lists, correct_tails)
         graphs = self.cog_graph.to_networkx()
         if return_graph:
@@ -491,8 +491,6 @@ class CogKR(nn.Module):
         else:
             reason_list = [[] for _ in range(len(correct_tails))]
         for batch_id, node_id in zip(correct_batch, correct_nodes):
-            if verbose:
-                print("{}: Query relation: {}".format(batch_id, self.id2relation[relations[batch_id]]))
             correct_tail = self.id2entity[self.cog_graph.node_lists[batch_id][node_id]]
             head = self.id2entity[self.cog_graph.node_lists[batch_id][0]]
             graph = graphs[batch_id]
@@ -520,8 +518,8 @@ class CogKR(nn.Module):
                 reason_list[batch_id] = reason_paths
         return reason_list
 
-    def forward(self, start_entities: list, other_correct_answers: list, end_entities=None, ground_graphs=None, evaluate_graphs=None,
-                support_pairs=None, relations=None, evaluate=False, candidates=None):
+    def forward(self, start_entities: list, other_correct_answers: list, end_entities=None,
+                evaluate_graphs=None, support_pairs=None, relations=None, evaluate=False, candidates=None):
         batch_size = len(start_entities)
         device = self.entity_embeddings.weight.device
         batch_index = torch.arange(0, batch_size, device=device)
@@ -559,6 +557,8 @@ class CogKR(nn.Module):
                 return torch.zeros(1, dtype=torch.float, device=device), rank_loss
         self.cog_graph.init(start_entities, other_correct_answers, evaluate_graphs, evaluate=evaluate)
         start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
+        if end_entities is not None:
+            end_entities = torch.tensor(end_entities, device=device, dtype=torch.long)
         self.agent.init(start_entities, query_representations=support_embeddings)
         # TODO: Normalize graph loss and entropy loss with time step
         if self.reward_policy == 'direct':
@@ -589,6 +589,12 @@ class CogKR(nn.Module):
                 else:
                     attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)), dim=-1, dim_size=self.entity_num)
                     attention /= attention.sum(dim=-1, keepdim=True)
+                    if end_entities is not None:
+                        action_entities = candidate_entities.reshape((batch_size, -1))
+                        final_scores = (action_entities == end_entities.unsqueeze(-1)).float()
+                        action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
+                        action_nums = (action_scores > 1e-10).sum(dim=1)
+                        aims, neighbors, currents = self.cog_graph.update(actions, action_nums)
             elif self.reward_policy == 'stochastic':
                 if not evaluate:
                     entropy = -(final_scores * torch.log(final_scores + 1e-10)).sum(dim=-1).mean()
@@ -609,7 +615,6 @@ class CogKR(nn.Module):
                 raise NotImplemented
         if not evaluate:
             if self.reward_policy == 'direct':
-                end_entities = torch.tensor(end_entities, dtype=torch.long, device=device)
                 correct_batch = attention[batch_index, end_entities] > 1e-10
                 self.reward = attention[batch_index, end_entities].sum().item() / batch_size
                 wrong_batch = batch_index[~correct_batch]
@@ -619,7 +624,6 @@ class CogKR(nn.Module):
                 loss = loss / batch_size
                 return loss, 0.0
             elif self.reward_policy == 'stochastic':
-                end_entities = torch.tensor(end_entities, dtype=torch.long, device=device)
                 rewards = (current_entities == end_entities.unsqueeze(-1)).any(dim=-1).float()
                 rewards /= current_masks.float().sum(dim=-1) + 1e-10
                 self.reward = rewards.mean().item()
