@@ -242,7 +242,9 @@ class CogGraph:
         # (batch_size, topk)
         neighbors_num = self.neighbor_nums[batch_index.unsqueeze(-1), aggregate_nodes].to(self.device)
         # (batch_size, topk, max_neighbors) get the neighbors of aim
+        max_neighbor_num = torch.max(neighbors_num)
         neighbors = self.neighbor_matrix[batch_index.unsqueeze(-1), aggregate_nodes].to(self.device)
+        neighbors = neighbors[:, :, :max_neighbor_num]
         if self.debug:
             for batch_id in range(len(actions)):
                 self.debug_outputs[batch_id].write("Update aims:\n")

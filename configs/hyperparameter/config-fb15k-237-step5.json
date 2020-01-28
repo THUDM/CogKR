@@ -4,8 +4,8 @@
     "add_self_loop": true
   },
   "model": {
-    "max_steps": 3,
-    "max_nodes": 50,
+    "max_steps": 5,
+    "max_nodes": 82,
     "max_neighbors": 10,
     "embed_size": 100,
     "hidden_size": 200,
@@ -40,7 +40,7 @@
     "test_rollout_num": 1
   },
   "train": {
-    "batch_size": 164,
+    "batch_size": 100,
     "test_batch_size": 256,
     "log_interval": 50,
     "evaluate_interval": 300,
