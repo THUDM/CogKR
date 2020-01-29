@@ -266,21 +266,22 @@ class Agent(nn.Module):
         self.max_nodes = max_nodes
         if query_size is None:
             query_size = hidden_size
+        self.query_size = query_size
         self.entity_embeddings = entity_embeddings
         self.relation_embeddings = relation_embeddings
         self.use_rnn = use_rnn
         if self.use_rnn:
-            self.hiddenRNN = nn.GRUCell(input_size=2 * embed_size, hidden_size=hidden_size)
+            self.hiddenRNN = nn.GRUCell(input_size=2 * self.embed_size, hidden_size=self.hidden_size)
         else:
-            self.hidden_layer = nn.Linear(embed_size, hidden_size)
-            self.pass_layer = nn.Linear(embed_size + hidden_size, hidden_size)
+            self.hidden_layer = nn.Linear(self.embed_size, self.hidden_size)
+            self.pass_layer = nn.Linear(self.embed_size + self.hidden_size, self.hidden_size)
             self.pass_activation = nn.Sequential()
             self.update_activation = nn.LeakyReLU()
-        self.nexthop_layer = nn.Linear(hidden_size + query_size + embed_size, hidden_size)
+        self.nexthop_layer = nn.Linear(self.hidden_size + self.query_size + self.embed_size, self.hidden_size)
         self.nexthop_activation = nn.LeakyReLU()
-        self.candidate_layer = nn.Linear(2 * embed_size + hidden_size, hidden_size)
+        self.candidate_layer = nn.Linear(2 * self.embed_size + self.hidden_size, self.hidden_size)
         self.candidate_activation = nn.LeakyReLU()
-        self.rank_layer = nn.Linear(hidden_size + query_size, 1)
+        self.rank_layer = nn.Linear(self.hidden_size + self.query_size, 1)
         # this should combine with the loss function
         self.rank_activation = nn.Sequential()
         self.debug = False
@@ -338,9 +339,9 @@ class Agent(nn.Module):
         if self.use_rnn:
             # (batch_size, topk, max_neighbors, 2 * embed_size) concatenated neighbor embeddings
             neighbor_embeddings = torch.cat((entity_embeddings.unsqueeze(2).expand_as(relation_embeddings), relation_embeddings), dim=-1)
-            updated_embeddings = self.hiddenRNN(neighbor_embeddings.reshape(batch_size * topk * max_neighbors, -1),
-                                                node_embeddings.reshape(batch_size * topk * max_neighbors, -1))
-            updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, -1)
+            updated_embeddings = self.hiddenRNN(neighbor_embeddings.reshape(batch_size * topk * max_neighbors, 2 * self.embed_size),
+                                                node_embeddings.reshape(batch_size * topk * max_neighbors, self.hidden_size))
+            updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, self.hidden_size)
         else:
             # (batch_size, topk, max_neighbors, embed_size + hidden_size) concatenated neighbor embeddings
             neighbor_embeddings = torch.cat((node_embeddings, relation_embeddings), dim=-1)
