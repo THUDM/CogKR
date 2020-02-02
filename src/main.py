@@ -287,7 +287,7 @@ class Main:
     def build_logger(self, log_directory=None, batch_id=None):
         self.log_directory = log_directory
         if self.log_directory is None:
-            self.log_directory = os.path.join(self.root_directory, "log", "{}-{}-{}-{}-{}".format(time.strftime("%m-%d-%H"), self.config['model']['max_steps'], self.config['model']['topk'], self.config['model']['reward_policy'], self.comment))
+            self.log_directory = os.path.join(self.root_directory, "log", "{}-{}-{}-{}-{}-{}".format(time.strftime("%m-%d-%H"), self.config['model']['max_steps'], self.config['model']['topk'], self.config['model']['reward_policy'], self.config['model']['use_rnn'], self.comment))
             if not os.path.exists(self.log_directory):
                 os.makedirs(self.log_directory)
             serialize(self.config, os.path.join(self.log_directory, 'config.json'), in_json=True)
