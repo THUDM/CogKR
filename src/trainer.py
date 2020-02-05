@@ -42,14 +42,13 @@ class Trainer:
             self.e1rel2_e2_test.setdefault((head, relation), set())
             self.e1rel2_e2_test[(head, relation)].add(tail)
         self.train_graphs = train_graphs
-        self.task_ground, self.task_support = {}, {}
-        # note we can't filter facts here
+        self.test_ground, self.test_support = {}, {}
         if test_tasks is not None:
             test_support, test_eval = test_tasks
             self.test_relations = []
             for head, relation, tail in test_support:
                 self.test_relations.append(relation)
-                self.task_support[relation] = (head, tail)
+                self.test_support[relation] = (head, tail)
                 if not self.meta_learn:
                     self.train_query[relation] = [(head, tail)]
                 self.e1rel2_e2_train.setdefault((head, relation), set())
@@ -59,17 +58,18 @@ class Trainer:
             for head, relation, tail in test_eval:
                 if relation in self.train_query and relation not in self.test_relations:
                     self.test_relations.append(relation)
-                    self.task_support[relation] = None
+                    self.test_support[relation] = None
                 self.e1rel2_e2_test.setdefault((head, relation), set())
                 self.e1rel2_e2_test[(head, relation)].add(tail)
-                self.task_ground.setdefault(relation, [])
-                self.task_ground[relation].append((head, tail))
+                self.test_ground.setdefault(relation, [])
+                self.test_ground[relation].append((head, tail))
+        self.valid_ground, self.valid_support = {}, {}
         if validate_tasks is not None:
             valid_support, valid_eval = validate_tasks
             self.validate_relations = []
             for head, relation, tail in valid_support:
                 self.validate_relations.append(relation)
-                self.task_support[relation] = (head, tail)
+                self.valid_support[relation] = (head, tail)
                 if not self.meta_learn:
                     self.train_query[relation] = [(head, tail)]
                 self.e1rel2_e2_train.setdefault((head, relation), set())
@@ -79,11 +79,11 @@ class Trainer:
             for head, relation, tail in valid_eval:
                 if relation in self.train_query and relation not in self.validate_relations:
                     self.validate_relations.append(relation)
-                    self.task_support[relation] = None
+                    self.valid_support[relation] = None
                 self.e1rel2_e2_test.setdefault((head, relation), set())
                 self.e1rel2_e2_test[(head, relation)].add(tail)
-                self.task_ground.setdefault(relation, [])
-                self.task_ground[relation].append((head, tail))
+                self.valid_ground.setdefault(relation, [])
+                self.valid_ground[relation].append((head, tail))
         self.rel2candidate = rel2candidate
         if self.rel2candidate is not None:
             valid_hit = self.check_rel2candidate(self.validate_relations)
@@ -124,8 +124,8 @@ class Trainer:
     def check_evaluate_graphs(self, relations):
         hit, num = 0, 0
         for relation in relations:
-            num += len(self.task_ground[relation])
-            for head, tail in self.task_ground[relation]:
+            num += len(self.test_ground[relation])
+            for head, tail in self.test_ground[relation]:
                 if (head, relation, tail) in self.evaluate_graphs or (head, relation) in self.evaluate_graphs:
                     hit += 1
         return hit / num
@@ -205,16 +205,16 @@ class Trainer:
         self.graph.eval()
         if specific_relation is None:
             if mode == 'test':
-                evaluate_relations = self.test_relations
+                evaluate_relations, evaluate_support, evaluate_ground = self.test_relations, self.test_support, self.test_ground
             elif mode == 'valid':
-                evaluate_relations = self.validate_relations
+                evaluate_relations, evaluate_support, evaluate_ground = self.validate_relations, self.valid_support, self.valid_ground
             else:
                 raise NotImplementedError
         else:
             evaluate_relations = [specific_relation]
         for relation in evaluate_relations:
-            evaluate_facts = self.task_ground[relation]
-            support_pair = self.task_support[relation]
+            evaluate_facts = evaluate_ground[relation]
+            support_pair = evaluate_support[relation]
             ground_sets = [self.e1rel2_e2_test[(head, relation)] - {tail} for head, tail in evaluate_facts]
             if use_graph and self.evaluate_graphs is not None:
                 evaluate_graphs = []

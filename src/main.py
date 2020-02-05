@@ -455,7 +455,7 @@ class Main:
                 e1e2_rel[pair].add(relation)
 
         sums, num = 0, 0
-        for relation, pairs in self.trainer.task_ground.items():
+        for relation, pairs in self.trainer.test_ground.items():
             print(relation)
             for head, tail in pairs:
                 num += 1
@@ -467,7 +467,7 @@ class Main:
     def get_test_fact_num(self):
         sums = 0
         for task in self.trainer.test_relations:
-            sums += len(self.trainer.task_ground[task])
+            sums += len(self.trainer.test_ground[task])
         return sums
 
     def save_to_hyper(self, data_dir):
@@ -488,13 +488,13 @@ class Main:
         facts_data = list(
             map(lambda x: (self.id2entity[x[0]], self.id2relation[x[1]], self.id2entity[x[2]]), facts_data))
         supports = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation, (head, tail) in
-                    self.trainer.task_support.items()]
+                    self.trainer.test_support.items()]
         facts_data = list(itertools.chain(facts_data,supports))
         valid_evaluate = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation in
-                          self.trainer.validate_relations for head, tail in self.trainer.task_ground[relation]]
+                          self.trainer.validate_relations for head, tail in self.trainer.test_ground[relation]]
         test_evaluate = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation in
                          self.trainer.test_relations for head, tail in
-                         self.trainer.task_ground[relation]]
+                         self.trainer.test_ground[relation]]
         save_to_file(itertools.chain(facts_data, *itertools.repeat(supports, 1)), os.path.join(data_dir, 'train.txt'))
         save_to_file(valid_evaluate, os.path.join(data_dir, "dev.txt"))
         save_to_file(test_evaluate, os.path.join(data_dir, "test.txt"))
@@ -518,12 +518,12 @@ class Main:
         facts_data = list(
             map(lambda x: (self.id2entity[x[0]], self.id2relation[x[1]], self.id2entity[x[2]]), facts_data))
         supports = [(self.id2entity[head], relation, self.id2entity[tail]) for relation, (head, tail) in
-                    self.trainer.task_support.items()]
+                    self.trainer.test_support.items()]
         valid_evaluate = [(self.id2entity[head], relation, self.id2entity[tail]) for relation in
-                          self.trainer.validate_relations for head, tail in self.trainer.task_ground[relation]]
+                          self.trainer.validate_relations for head, tail in self.trainer.test_ground[relation]]
         test_evaluate = [(self.id2entity[head], relation, self.id2entity[tail]) for relation in
                          self.trainer.test_relations for head, tail in
-                         self.trainer.task_ground[relation]]
+                         self.trainer.test_ground[relation]]
         save_to_file(itertools.chain(facts_data, supports), os.path.join(data_dir, 'raw.kb'))
         save_to_file(itertools.chain(facts_data, supports), os.path.join(data_dir, "train.triples"))
         save_to_file(valid_evaluate, os.path.join(data_dir, "dev.triples"))
