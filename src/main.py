@@ -429,30 +429,23 @@ class Main:
             graph.add_edges_from(deleted_edges)
         return fact_dist
 
-    def get_dist_dict(self, mode='test', by_relation=True):
+    def get_dist_dict(self, mode='test' ):
         self.graph = self.kg.to_networkx(multi=False)
         global_dist_count = defaultdict(int)
         fact_dist = {}
-        if mode == 'test':
-            relations = self.trainer.test_relations
-        elif mode == 'valid':
-            relations = self.trainer.validate_relations
-        else:
-            raise NotImplemented
-        for relation in relations:
+        data_loader = self.trainer.evaluate(mode=mode)
+        for relation, support_pair, evaluate_facts, *other in data_loader:
             dist_count = defaultdict(int)
-            for head, tail in self.trainer.task_ground[relation]:
+            for head, tail in evaluate_facts:
                 try:
                     dist = shortest_path_length(self.graph, head, tail)
                 except networkx.NetworkXNoPath:
                     dist = -1
                 dist_count[dist] += 1
                 global_dist_count[dist] += 1
-                fact_dist[(head, relation, tail)] = dist
-            if by_relation:
-                print(relation, sorted(dist_count.items(), key=lambda x: x[0]))
+                fact_dist[(self.id2entity[head], self.id2relation[relation], self.id2entity[tail])] = dist
         print(sorted(global_dist_count.items(), key=lambda x: x[0]))
-        return fact_dist, global_dist_count
+        return fact_dist
 
     def get_onehop_ratio(self):
         e1e2_rel = {}
@@ -568,6 +561,9 @@ if __name__ == "__main__":
     elif args.get_fact_dist:
         fact_dist = main_body.get_fact_dist(main_body.config['trainer']['ignore_relation'])
         serialize(fact_dist, os.path.join(main_body.data_directory, "fact_dist"))
+    elif args.get_dist_dict:
+        dist_dict = main_body.get_dist_dict(mode='test')
+        serialize(dist_dict, os.path.join(main_body.data_directory, "dist_dict"))
     elif args.pretrain:
         main_body.build_pretrain_model(main_body.config['model'])
         main_body.build_pretrain_optimiaer(main_body.config['optimizer'])
@@ -598,8 +594,8 @@ if __name__ == "__main__":
                 if args.load_state:
                     main_body.load_state(args.load_state, train=False)
                 print("Evaluate on valid data")
-                # results = main_body.evaluate_model(mode='valid')
-                # print(results)
+                results = main_body.evaluate_model(mode='valid')
+                print(results)
                 print("Evaluate on test data")
                 if args.save_result:
                     save_result = os.path.join(os.path.dirname(args.load_state), args.save_result)
