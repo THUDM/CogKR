@@ -24,42 +24,6 @@ class Main:
         self.root_directory = root_directory
         self.comment = comment
         self.device = device
-        self.config = {
-            'graph': {
-                'train_width': 256,
-                'test_width': 2000
-            },
-            'model': {
-                "max_nodes": 256, "max_neighbors": 32,
-                "embed_size": 64, "topk": 5, 'reward_policy': 'direct'
-            }, 'optimizer': {
-                'name': 'Adam',
-                'summary': {
-                    'lr': 1e-5
-                },
-                'embed': {
-                    'lr': 1e-5
-                },
-                'agent': {
-                    'lr': 1e-4
-                },
-                'config': {
-                    'weight_decay': 1e-4
-                }
-            }, 'pretrain_optimizer': {
-                'lr': 1e-4
-            }, 'trainer': {
-                'ignore_relation': True,
-                'weighted_sample': True
-            }, 'train': {
-                'batch_size': 32,
-                'log_interval': 1000,
-                'evaluate_interval': 5000,
-                'validate_metric': 'MAP'
-            }, 'pretrain': {
-                'batch_size': 64,
-                'keep_embed': False
-            }}
         self.measure_dict = {
             'Hit1': functools.partial(hitRatio, topn=1),
             'Hit3': functools.partial(hitRatio, topn=3),
@@ -161,7 +125,6 @@ class Main:
             else:
                 self.best_results = {}
             self.total_graph_loss = state.get('graph_loss', 0.0)
-            self.total_rank_loss = state.get('rank_loss', 0.0)
             self.total_graph_size = state.get('graph_size', 0.0)
             self.total_reward = state.get('reward', 0.0)
 
@@ -232,7 +195,7 @@ class Main:
         }, {'params': self.agent_parameters, **optimizer_config['agent']}])
         self.optimizer = torch.optim.__getattribute__(optimizer_config['name'])(self.optim_params,
                                                                                 **optimizer_config['config'])
-        self.total_graph_loss, self.total_rank_loss = 0.0, 0.0
+        self.total_graph_loss = 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
         self.entropy_beta = self.config['train'].get('entropy_beta', 0.0)
         print("Entropy beta: ", self.entropy_beta)
@@ -248,7 +211,6 @@ class Main:
             'optimizer': self.optimizer.state_dict(),
             'batch_id': self.batch_id + 1,
             'graph_loss': self.total_graph_loss,
-            'rank_loss': self.total_rank_loss,
             'reward': self.total_reward,
             'graph_size': self.total_graph_size,
             'log_file': self.log_file,
@@ -318,12 +280,10 @@ class Main:
     def log(self):
         interval = self.config['train']['log_interval']
         self.writer.add_scalar('graph_loss', self.total_graph_loss / interval, self.batch_id)
-        self.writer.add_scalar('rank_loss', self.total_rank_loss / interval, self.batch_id)
         self.writer.add_scalar('reward', self.total_reward / interval, self.batch_id)
         self.writer.add_scalar('graph_size', self.total_graph_size / interval, self.batch_id)
-        self.logger.info("Loss: {}, Reward: {}".format(self.total_graph_loss, self.total_reward / interval))
-        self.total_graph_loss, self.total_rank_loss = 0.0, 0.0
-        self.total_graph_size, self.total_reward = 0, 0.0
+        self.logger.info("[Step: {}] Loss: {}, Reward: {}".format(self.batch_id + 1, self.total_graph_loss, self.total_reward / interval))
+        self.total_graph_loss, self.total_graph_size, self.total_reward = 0.0, 0, 0.0
 
     def train(self, single_step=False):
         meta_learn = self.config.get('trainer', {}).get('meta_learn', True)

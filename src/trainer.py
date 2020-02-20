@@ -12,7 +12,7 @@ class Trainer:
                  test_tasks=None, validate_tasks=None,
                  rel2candidate: dict = None, id2entity=None, id2relation=None, fact_dist=None,
                  weighted_sample=True, ignore_onehop=False, meta_learn=True, sample_weight=0.75, rollout_num=1,
-                 test_rollout_num=1):
+                 test_rollout_num=1, dist_limit=5):
         self.graph = graph
         self.cutoff = cutoff
         self.reverse_relation = reverse_relation
@@ -34,7 +34,7 @@ class Trainer:
                 self.train_support[relation] = []
             pair = (head, tail)
             # TODO use flexible limit here
-            if fact_dist is None or -1 < fact_dist[(head, relation, tail)] < 5:
+            if fact_dist is None or -1 < fact_dist[(head, relation, tail)] < dist_limit:
                 self.train_query[relation].append(pair)
             else:
                 self.train_support[relation].append(pair)
