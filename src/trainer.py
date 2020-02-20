@@ -278,7 +278,7 @@ class Trainer:
                     #         entity_scores[batch_id][result[j]] += score[j]
                     # result = list(entity_scores[batch_id])
                     # result = sorted(result, key=entity_scores[batch_id].get, reverse=True)
-                    # result = list(filter(lambda x: x not in ground[batch_id] or x == batch[batch_id][1], result))
+                    result = list(filter(lambda x: x not in ground[batch_id] or x == batch[batch_id][1], result))
                     if relation_id in self.rel2candidate:
                         result = list(filter(lambda x: x in candidates or x == batch[batch_id][1], result))
                     if save_result:
