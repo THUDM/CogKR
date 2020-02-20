@@ -105,25 +105,13 @@ class Main:
             self.fact_dist = unserialize(os.path.join(self.data_directory, "fact_dist"))
         else:
             self.fact_dist = None
-        if os.path.exists(os.path.join(self.data_directory, "train_graphs")):
-            self.train_graphs = unserialize(os.path.join(self.data_directory, "train_graphs"))
-        else:
-            self.train_graphs = None
-        # if os.path.exists(os.path.join(self.data_directory, "evaluate_graphs")):
-        # TODO shouldn't use evaluate graphs anymore
-        # if False:
-        #     print("Use evaluate graphs")
-        #     self.evaluate_graphs = unserialize(os.path.join(self.data_directory, "evaluate_graphs"))
-        # else:
-        #     print("Warning: Can't find evaluate graphs")
-        #     self.evaluate_graphs = None
+        # No longer used
+        self.train_graphs = None
         self.evaluate_graphs = None
         if os.path.exists(os.path.join(self.data_directory, "rel2candidates")):
             self.rel2candidate = unserialize(os.path.join(self.data_directory, "rel2candidates"))
         else:
             self.rel2candidate = {}
-        # self.rel2candidate = {self.relation_dict[key]: value for key, value in self.rel2candidate.items() if
-        #                       key in self.relation_dict}
         self.id2entity = sorted(self.entity_dict.keys(), key=self.entity_dict.get)
         self.id2relation = sorted(self.relation_dict.keys(), key=self.relation_dict.get)
         self.data_loaded = True
@@ -540,13 +528,11 @@ class Main:
 if __name__ == "__main__":
     # Parse arguments
     from parse_args import args
-    # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     device = torch.device('cuda:{}'.format(args.gpu))
-    # device = torch.device("cpu")
-    torch.set_num_threads(10)
-    os.environ['MKL_NUM_THREADS'] = '10'
-    os.environ['NUMEXPR_NUM_THREADS'] = '10'
-    os.environ['OMP_NUM_THREADS'] = '10'
+    torch.set_num_threads(args.num_threads)
+    os.environ['MKL_NUM_THREADS'] = str(args.num_threads)
+    os.environ['NUMEXPR_NUM_THREADS'] = str(args.num_threads)
+    os.environ['OMP_NUM_THREADS'] = str(args.num_threads)
     main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment)
     if args.config:
         main_body.config = unserialize(args.config)

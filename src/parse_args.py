@@ -3,6 +3,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Cognitive Graph for Knowledge Graph Reasoning')
 parser.add_argument('--directory', type=str, help='root directory')
 parser.add_argument('--gpu', type=int, help='specify the gpu number to use')
+parser.add_argument('--num_threads', type=int, default=10)
 parser.add_argument('--config', default=None)
 parser.add_argument('--comment', type=str, default='init')
 parser.add_argument('--log_dir', type=str, default=None)
