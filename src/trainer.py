@@ -8,10 +8,11 @@ from collections import defaultdict
 
 
 class Trainer:
-    def __init__(self, graph: KG, train_facts, cutoff, reverse_relation: list, train_graphs: dict = None,
-                 test_tasks=None, validate_tasks=None, evaluate_graphs: dict = None,
+    def __init__(self, graph: KG, train_facts, cutoff, reverse_relation: list,
+                 test_tasks=None, validate_tasks=None,
                  rel2candidate: dict = None, id2entity=None, id2relation=None, fact_dist=None,
-                 weighted_sample=True, ignore_onehop=False, meta_learn=True, sample_weight=0.75, rollout_num=1, test_rollout_num=1):
+                 weighted_sample=True, ignore_onehop=False, meta_learn=True, sample_weight=0.75, rollout_num=1,
+                 test_rollout_num=1):
         self.graph = graph
         self.cutoff = cutoff
         self.reverse_relation = reverse_relation
@@ -32,8 +33,8 @@ class Trainer:
             if relation not in self.train_support:
                 self.train_support[relation] = []
             pair = (head, tail)
-            if (train_graphs is None or (head, relation, tail) in train_graphs) and (
-                    fact_dist is None or -1 < fact_dist[(head, relation, tail)] < 5):
+            # TODO use flexible limit here
+            if fact_dist is None or -1 < fact_dist[(head, relation, tail)] < 5:
                 self.train_query[relation].append(pair)
             else:
                 self.train_support[relation].append(pair)
@@ -41,7 +42,6 @@ class Trainer:
             self.e1rel2_e2_train[(head, relation)].add(tail)
             self.e1rel2_e2_test.setdefault((head, relation), set())
             self.e1rel2_e2_test[(head, relation)].add(tail)
-        self.train_graphs = train_graphs
         self.test_ground, self.test_support = {}, {}
         if test_tasks is not None:
             test_support, test_eval = test_tasks
@@ -90,18 +90,13 @@ class Trainer:
             print("Validate relations in rel2candidate: {}".format(valid_hit))
             test_hit = self.check_rel2candidate(self.test_relations)
             print("Test relations in rel2candidate: {}".format(test_hit))
-        self.evaluate_graphs = evaluate_graphs
-        if self.evaluate_graphs is not None:
-            valid_hit = self.check_evaluate_graphs(self.validate_relations)
-            print("Validate facts in evaluate graphs: {}".format(valid_hit))
-            test_hit = self.check_evaluate_graphs(self.test_relations)
-            print("Test facts in evaluate graphs: {}".format(test_hit))
         if self.meta_learn:
             min_fact = 2
         else:
             min_fact = 0
         self.train_relations = list(
-            filter(lambda x: len(self.train_query[x]) >= min_fact or x in self.test_relations or x in self.validate_relations,
+            filter(lambda x: len(
+                self.train_query[x]) >= min_fact or x in self.test_relations or x in self.validate_relations,
                    self.train_query))
         print("Train relations: {}".format(len(self.train_relations)))
         self.pretrain_relations = list(
@@ -109,7 +104,8 @@ class Trainer:
         if weighted_sample:
             # use weighted sampler
             self.train_sampler = WeightedRandomSampler(
-                weights=list(map(lambda x: len(self.train_query[x]) ** sample_weight, self.train_relations)), num_samples=1)
+                weights=list(map(lambda x: len(self.train_query[x]) ** sample_weight, self.train_relations)),
+                num_samples=1)
         else:
             # or use uniform sampler
             self.train_sampler = RandomSampler(range(len(self.train_relations)), num_samples=1, replacement=True)
@@ -130,7 +126,7 @@ class Trainer:
                     hit += 1
         return hit / num
 
-    def predict_sample(self, batch_size):
+    def pretrain_sample(self, batch_size):
         pairs, labels = [], []
         self.graph.eval()
         self.graph.ignore_edges = []
@@ -149,7 +145,7 @@ class Trainer:
         if self.ignore_onehop:
             self.graph.ignore_pairs = []
         self.graph.ignore_edges = []
-        support_pairs, relations, query_heads, query_tails, other_correct_answers, graphs = [], [], [], [], [], []
+        support_pairs, relations, query_heads, query_tails, other_correct_answers = [], [], [], [], []
         for _ in range(batch_size):
             if specific_relation is not None:
                 relation = specific_relation
@@ -161,13 +157,8 @@ class Trainer:
                 query_pair = random.choice(self.train_query[relation])
                 while query_pair == support_pair:
                     query_pair = random.choice(self.train_query[relation])
-                if self.train_graphs is None:
-                    graph = None
-                else:
-                    graph = self.train_graphs.get((query_pair[0], relation, query_pair[1]))
             else:
                 query_pair = random.choice(self.train_query[relation])
-                graph = None
             if self.ignore_onehop:
                 ignore_edges = ((query_pair[1], query_pair[0], inv_relation),)
             else:
@@ -178,14 +169,13 @@ class Trainer:
             query_heads += [query_pair[0]] * self.rollout_num
             query_tails += [query_pair[1]] * self.rollout_num
             other_correct_answers += [ground] * self.rollout_num
-            graphs += [graph] * self.rollout_num
             if self.meta_learn:
                 support_pairs += [support_pair] * self.rollout_num
             self.graph.ignore_edges += [ignore_edges] * self.rollout_num
             if self.ignore_onehop:
                 self.graph.ignore_pairs += [(query_pair[0], query_pair[1])] * self.rollout_num
         self.graph.ignore_batch()
-        return support_pairs, query_heads, query_tails, relations, other_correct_answers, graphs
+        return support_pairs, query_heads, query_tails, relations, other_correct_answers
 
     def train_evaluate(self, relation_num=None, specific_relation=None):
         if specific_relation is None:
@@ -216,16 +206,7 @@ class Trainer:
             evaluate_facts = evaluate_ground[relation]
             support_pair = evaluate_support[relation]
             ground_sets = [self.e1rel2_e2_test[(head, relation)] - {tail} for head, tail in evaluate_facts]
-            if use_graph and self.evaluate_graphs is not None:
-                evaluate_graphs = []
-                for head, tail in evaluate_facts:
-                    if (head, relation, tail) in self.evaluate_graphs:
-                        evaluate_graphs.append(self.evaluate_graphs[(head, relation, tail)])
-                    else:
-                        evaluate_graphs.append(self.evaluate_graphs.get((head, relation)))
-                yield relation, support_pair, evaluate_facts, ground_sets, evaluate_graphs
-            else:
-                yield relation, support_pair, evaluate_facts, ground_sets
+            yield relation, support_pair, evaluate_facts, ground_sets
 
     def evaluate_generator(self, module, data_loader, batch_size=16, save_result=None, save_graph=None):
         if save_result:
@@ -233,7 +214,6 @@ class Trainer:
         if save_graph:
             self.reason_graphs = {}
         for relation_id, support_pair, evaluate_data, ground_sets, *evaluate_graphs in tqdm(data_loader):
-            relation = self.id2relation[relation_id]
             if relation_id in self.rel2candidate:
                 candidates = set(self.rel2candidate[relation_id])
             else:
@@ -244,28 +224,28 @@ class Trainer:
                 start_entities = [data[0] for data in batch] * self.test_rollout_num
                 tail_entities = [data[1] for data in batch] * self.test_rollout_num
                 other_correct_answers = [item for item in ground] * self.test_rollout_num
-                if len(evaluate_graphs) > 0:
-                    graphs = evaluate_graphs[0][idx[0]: idx[-1] + 1]
-                else:
-                    graphs = None
                 if self.meta_learn:
                     results, scores = module(start_entities, other_correct_answers=other_correct_answers,
-                                             support_pairs=[support_pair], evaluate=True, evaluate_graphs=graphs,
+                                             support_pairs=[support_pair], evaluate=True,
                                              candidates=candidates | set(tail_entities), end_entities=tail_entities)
                 else:
                     relations = [relation_id]
                     results, scores = module(start_entities, other_correct_answers=other_correct_answers,
-                                             relations=relations, evaluate=True, evaluate_graphs=graphs,
+                                             relations=relations, evaluate=True,
                                              candidates=candidates | set(tail_entities), end_entities=tail_entities)
                 if save_graph:
                     reason_paths = module.get_correct_path(tail_entities, return_graph=True)
                     for batch_id in range(len(batch)):
                         self.reason_graphs["\t".join(
-                            (self.id2entity[start_entities[batch_id]], relation, self.id2entity[tail_entities[batch_id]]))] = \
+                            (self.id2entity[start_entities[batch_id]], self.id2relation[relation_id],
+                             self.id2entity[tail_entities[batch_id]]))] = \
                             reason_paths[batch_id]
                 for batch_id in range(len(batch)):
-                    entities = [entity for rollout_id in range(self.test_rollout_num) for entity in results[rollout_id * len(batch) + batch_id]]
-                    score = [score for rollout_id in range(self.test_rollout_num) for score in scores[rollout_id * len(batch) + batch_id]]
+                    # use max-pooling
+                    entities = [entity for rollout_id in range(self.test_rollout_num) for entity in
+                                results[rollout_id * len(batch) + batch_id]]
+                    score = [score for rollout_id in range(self.test_rollout_num) for score in
+                             scores[rollout_id * len(batch) + batch_id]]
                     sorted_indx = np.argsort(-np.array(score))
                     seen, result = set(), []
                     for r in sorted_indx:
@@ -282,10 +262,11 @@ class Trainer:
                     if relation_id in self.rel2candidate:
                         result = list(filter(lambda x: x in candidates or x == batch[batch_id][1], result))
                     if save_result:
-                        save_result.write("\t".join([self.id2entity[start_entities[batch_id]], relation,
-                                                    self.id2entity[batch[batch_id][1]]] + list(
-                            map(lambda x: self.id2entity[x], result))) + "\n")
-                    yield [batch[batch_id][1]], result                    
+                        save_result.write("\t".join(
+                            [self.id2entity[start_entities[batch_id]], self.id2relation[relation_id],
+                             self.id2entity[batch[batch_id][1]]] + list(
+                                map(lambda x: self.id2entity[x], result))) + "\n")
+                    yield [batch[batch_id][1]], result
         if save_result:
             save_result.close()
         if save_graph:

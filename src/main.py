@@ -105,9 +105,6 @@ class Main:
             self.fact_dist = unserialize(os.path.join(self.data_directory, "fact_dist"))
         else:
             self.fact_dist = None
-        # No longer used
-        self.train_graphs = None
-        self.evaluate_graphs = None
         if os.path.exists(os.path.join(self.data_directory, "rel2candidates")):
             self.rel2candidate = unserialize(os.path.join(self.data_directory, "rel2candidates"))
         else:
@@ -126,8 +123,8 @@ class Main:
         self.kg = KG(self.facts_data, entity_num=len(self.entity_dict), relation_num=len(self.relation_dict),
                      node_scores=self.pagerank, build_matrix=build_matrix, self_loop_id=self_loop_id, **graph_config)
         self.trainer = Trainer(self.kg, self.facts_data, reverse_relation=self.reverse_relation, cutoff=3,
-                               train_graphs=self.train_graphs, validate_tasks=(self.valid_support, self.valid_eval),
-                               test_tasks=(self.test_support, self.test_eval), evaluate_graphs=self.evaluate_graphs,
+                               validate_tasks=(self.valid_support, self.valid_eval),
+                               test_tasks=(self.test_support, self.test_eval),
                                id2entity=self.id2entity, id2relation=self.id2relation, rel2candidate=self.rel2candidate,
                                fact_dist=self.fact_dist, **self.config.get('trainer', {}))
         self.env_built = True
@@ -298,7 +295,7 @@ class Main:
 
     def pretrain(self, single_step=False):
         for batch_id in tqdm(self.batch_sampler):
-            support_pairs, labels = self.trainer.predict_sample(self.config['pretrain']['batch_size'])
+            support_pairs, labels = self.trainer.pretrain_sample(self.config['pretrain']['batch_size'])
             labels = torch.tensor(labels, dtype=torch.long, device=self.device)
             scores = self.summary(support_pairs, predict=True)
             loss = self.loss_function(scores, labels)
@@ -335,7 +332,7 @@ class Main:
         for self.batch_id in tqdm.tqdm(self.batch_sampler):
             if 'max_steps' in self.config['train'] and self.batch_id > self.config['train']['max_steps']:
                 break
-            support_pairs, query_heads, query_tails, relations, other_correct_answers, graphs = self.trainer.sample(
+            support_pairs, query_heads, query_tails, relations, other_correct_answers = self.trainer.sample(
                 self.config['train']['batch_size'])
             if meta_learn:
                 graph_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
@@ -591,8 +588,7 @@ if __name__ == "__main__":
                     save_graph = os.path.join(os.path.dirname(args.load_state), args.save_graph)
                 else:
                     save_graph = None
-                results = main_body.evaluate_model(mode='test', output=save_result, save_graph=save_graph,
-                                                    use_graph=True)
+                results = main_body.evaluate_model(mode='test', output=save_result, save_graph=save_graph)
                 print(results)
         else:
             if args.load_state:

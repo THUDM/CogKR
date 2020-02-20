@@ -88,14 +88,13 @@ class CogGraph:
         self.debug = False
         self.topk = topk
 
-    def init(self, start_entities: list, other_correct_answers, ground_graphs=None, evaluate=False):
+    def init(self, start_entities: list, other_correct_answers, evaluate=False):
         self.evaluate = evaluate
         self.batch_size = len(start_entities)
         # self.other_correct_answers = list2tensor(other_correct_answers, padding_idx=self.entity_pad, dtype=torch.long, device=self.device)
         self.other_correct_answers = [np.array(list(answer_set)) for answer_set in other_correct_answers]
         batch_index = torch.arange(0, self.batch_size, dtype=torch.long)
         # each line is the head entity and relation type
-        self.ground_graphs = ground_graphs
         self.neighbor_matrix = torch.zeros(self.batch_size, self.max_nodes + 2, self.max_neighbors, 2, dtype=torch.long)
         # padding the neighbors
         self.neighbor_matrix[:, :, :, 0] = self.node_pad
@@ -145,10 +144,12 @@ class CogGraph:
         candidate_entities, candidate_relations = candidates.select(-1, 0), candidates.select(-1, 1)
         candidate_nodes = self.entity_translate[
             batch_index.unsqueeze(-1).unsqueeze(-1), candidate_entities]
-        self.states = ((current_nodes, current_entities, current_masks), (candidate_nodes, candidate_entities, candidate_relations))
+        self.states = (
+        (current_nodes, current_entities, current_masks), (candidate_nodes, candidate_entities, candidate_relations))
         if last_step:
             for batch_id in range(self.batch_size):
-                other_masks = np.isin(candidate_entities[batch_id].numpy(), self.other_correct_answers[batch_id], invert=True)
+                other_masks = np.isin(candidate_entities[batch_id].numpy(), self.other_correct_answers[batch_id],
+                                      invert=True)
                 candidate_masks[batch_id] &= torch.from_numpy(other_masks).byte()
         return (current_nodes.to(self.device), current_entities.to(self.device), current_masks.to(self.device)), (
             candidate_nodes.to(self.device), candidate_entities.to(self.device), candidate_relations.to(self.device),
@@ -232,13 +233,17 @@ class CogGraph:
         self.neighbor_matrix[batch_index.unsqueeze(-1), node_id_batch, neighbor_id_batch] = torch.stack(
             (update_nodes, update_relations), dim=-1)
         aggregate_nodes = [list(map(self.entity2node[batch_id].get, aggregate_entities[batch_id])) for batch_id in
-                     range(self.batch_size)]
+                           range(self.batch_size)]
         attend_nums = torch.tensor(list(map(len, attend_entities)), dtype=torch.long, device=self.device)
-        attend_entities = list2tensor(attend_entities, padding_idx=self.entity_pad, dtype=torch.long, device=self.device)
-        attend_masks = torch.arange(attend_entities.size(-1), device=self.device).unsqueeze(0) < attend_nums.unsqueeze(-1)
-        aggregate_nodes = list2tensor(aggregate_nodes, padding_idx=self.node_pos_pad, dtype=torch.long, device=self.device)
+        attend_entities = list2tensor(attend_entities, padding_idx=self.entity_pad, dtype=torch.long,
+                                      device=self.device)
+        attend_masks = torch.arange(attend_entities.size(-1), device=self.device).unsqueeze(0) < attend_nums.unsqueeze(
+            -1)
+        aggregate_nodes = list2tensor(aggregate_nodes, padding_idx=self.node_pos_pad, dtype=torch.long,
+                                      device=self.device)
         aggregate_nums = torch.tensor(list(map(len, aggregate_entities)), dtype=torch.long, device=self.device)
-        aggregate_entities = list2tensor(aggregate_entities, dtype=torch.long, device=self.device, padding_idx=self.entity_pad)
+        aggregate_entities = list2tensor(aggregate_entities, dtype=torch.long, device=self.device,
+                                         padding_idx=self.entity_pad)
         # (batch_size, topk)
         neighbors_num = self.neighbor_nums[batch_index.unsqueeze(-1), aggregate_nodes].to(self.device)
         # (batch_size, topk, max_neighbors) get the neighbors of aim
@@ -252,8 +257,10 @@ class CogGraph:
                     aggregate_entity = aggregate_nodes[batch_id, i].item()
                     self.debug_outputs[batch_id].write("Node: {} ".format(aggregate_entity))
                     self.debug_outputs[batch_id].write(
-                        str(self.neighbor_matrix[batch_id, aggregate_entity, :neighbors_num[batch_id, i]].tolist()) + "\n")
-        return (aggregate_nodes, aggregate_entities, aggregate_nums), (neighbors, neighbors_num), (attend_entities, attend_masks)
+                        str(self.neighbor_matrix[batch_id, aggregate_entity,
+                            :neighbors_num[batch_id, i]].tolist()) + "\n")
+        return (aggregate_nodes, aggregate_entities, aggregate_nums), (neighbors, neighbors_num), (
+        attend_entities, attend_masks)
 
 
 class Agent(nn.Module):
@@ -338,9 +345,11 @@ class Agent(nn.Module):
         # relation_embeddings = relation_embeddings.view(batch_size, topk, max_neighbors, self.embed_size)
         if self.use_rnn:
             # (batch_size, topk, max_neighbors, 2 * embed_size) concatenated neighbor embeddings
-            neighbor_embeddings = torch.cat((entity_embeddings.unsqueeze(2).expand_as(relation_embeddings), relation_embeddings), dim=-1)
-            updated_embeddings = self.hiddenRNN(neighbor_embeddings.reshape(batch_size * topk * max_neighbors, 2 * self.embed_size),
-                                                node_embeddings.reshape(batch_size * topk * max_neighbors, self.hidden_size))
+            neighbor_embeddings = torch.cat(
+                (entity_embeddings.unsqueeze(2).expand_as(relation_embeddings), relation_embeddings), dim=-1)
+            updated_embeddings = self.hiddenRNN(
+                neighbor_embeddings.reshape(batch_size * topk * max_neighbors, 2 * self.embed_size),
+                node_embeddings.reshape(batch_size * topk * max_neighbors, self.hidden_size))
             updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, self.hidden_size)
         else:
             # (batch_size, topk, max_neighbors, embed_size + hidden_size) concatenated neighbor embeddings
@@ -384,8 +393,9 @@ class Agent(nn.Module):
         else:
             current_embeddings = torch.zeros(batch_size, rollout_num, self.embed_size, device=current_nodes.device)
         # concatenate the hidden states with query embeddings
-        current_embeddings = torch.cat((current_representations, self.query_representations.unsqueeze(1).expand(batch_size, rollout_num, -1),
-                                        current_embeddings), dim=-1)
+        current_embeddings = torch.cat(
+            (current_representations, self.query_representations.unsqueeze(1).expand(batch_size, rollout_num, -1),
+             current_embeddings), dim=-1)
         current_state = self.nexthop_activation(self.nexthop_layer(current_embeddings))
         # (batch_size, rollout_num, max_neighbors, hidden_size) get the node representations of candidates
         node_embeddings = self.node_embeddings[batch_index.unsqueeze(-1), candidate_nodes]
@@ -425,8 +435,10 @@ class Agent(nn.Module):
 
 
 class CogKR(nn.Module):
-    def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int, max_neighbors: int,
-                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0, onlyS=False, update_hidden=True,
+    def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int,
+                 max_neighbors: int,
+                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True,
+                 baseline_lambda=0.0, onlyS=False, update_hidden=True,
                  use_rnn=True, sparse_embed=False, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
@@ -529,7 +541,7 @@ class CogKR(nn.Module):
         return reason_list
 
     def forward(self, start_entities: list, other_correct_answers: list, end_entities=None,
-                evaluate_graphs=None, support_pairs=None, relations=None, evaluate=False, candidates=None):
+                support_pairs=None, relations=None, evaluate=False, candidates=None):
         batch_size = len(start_entities)
         device = self.entity_embeddings.weight.device
         batch_index = torch.arange(0, batch_size, device=device)
@@ -560,12 +572,15 @@ class CogKR(nn.Module):
                 support_embeddings = support_embeddings.unsqueeze(1)
                 negative_entities = torch.randint(0, self.entity_embeddings.num_embeddings, size=(
                     batch_size, 1000), device=device)
-                positive_scores = self.agent.compute_score(self.entity_embeddings(start_entities), self.entity_embeddings(end_entities), support_embeddings)
-                negative_scores = self.agent.compute_score(self.entity_embeddings(start_entities), self.entity_embeddings(negative_entities), support_embeddings)
+                positive_scores = self.agent.compute_score(self.entity_embeddings(start_entities),
+                                                           self.entity_embeddings(end_entities), support_embeddings)
+                negative_scores = self.agent.compute_score(self.entity_embeddings(start_entities),
+                                                           self.entity_embeddings(negative_entities),
+                                                           support_embeddings)
                 labels = torch.ones(batch_size, 1000, dtype=torch.float, device=device)
                 rank_loss = self.loss(positive_scores, negative_scores, labels)
                 return torch.zeros(1, dtype=torch.float, device=device), rank_loss
-        self.cog_graph.init(start_entities, other_correct_answers, evaluate_graphs, evaluate=evaluate)
+        self.cog_graph.init(start_entities, other_correct_answers, evaluate=evaluate)
         start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
         if end_entities is not None:
             end_entities = torch.tensor(end_entities, device=device, dtype=torch.long)
@@ -591,14 +606,16 @@ class CogKR(nn.Module):
                     action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
                     action_nums = (action_scores > 1e-10).sum(dim=1)
                     action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
-                    attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1, dim_size=self.entity_num)
+                    attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1,
+                                                          dim_size=self.entity_num)
                     attention /= attention.sum(dim=-1, keepdim=True)
                     aims, neighbors, currents = self.cog_graph.update(actions, action_nums)
                     current_entities, current_masks = currents
                     if self.update_hidden:
                         self.agent.aggregate(aims, neighbors)
                 else:
-                    attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)), dim=-1, dim_size=self.entity_num)
+                    attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)),
+                                                          dim=-1, dim_size=self.entity_num)
                     attention /= attention.sum(dim=-1, keepdim=True)
                     if end_entities is not None:
                         action_entities = candidate_entities.reshape((batch_size, -1))
@@ -631,7 +648,7 @@ class CogKR(nn.Module):
                 self.reward = attention[batch_index, end_entities].sum().item() / batch_size
                 wrong_batch = batch_index[~correct_batch]
                 correct_batch = batch_index[correct_batch]
-                loss = -torch.log(attention[correct_batch, end_entities[correct_batch]]+1e-10).sum()
+                loss = -torch.log(attention[correct_batch, end_entities[correct_batch]] + 1e-10).sum()
                 loss = loss - torch.log(1.01 - attention[wrong_batch].sum(dim=-1)).sum()
                 loss = loss / batch_size
                 return loss, 0.0
