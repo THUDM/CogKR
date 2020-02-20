@@ -12,7 +12,8 @@ from contextlib import ExitStack
 
 from grapher import KG
 from torch_utils import load_embedding
-from utils import unserialize, serialize, inverse_relation, load_facts, load_index, translate_facts, add_reverse_relations, TqdmLoggingHandler
+from utils import unserialize, serialize, inverse_relation, load_facts, load_index, translate_facts, \
+    add_reverse_relations, TqdmLoggingHandler
 from trainer import Trainer
 from module import CogKR, Summary
 from evaluation import hitRatio, MAP, multi_mean_measure, MRR
@@ -24,6 +25,19 @@ class Main:
         self.root_directory = root_directory
         self.comment = comment
         self.device = device
+        self.config = {
+            "trainer": {},
+            'train': {
+                'entropy_beta': 0.0,
+                'validate_metric': 'MAP'
+            },
+            "pretrain": {
+                "keep_embed": False,
+                "log_interval": 1000,
+                "evaluate_interval": 10000
+            },
+            "sparse_embed": False
+        }
         self.measure_dict = {
             'Hit1': functools.partial(hitRatio, topn=1),
             'Hit3': functools.partial(hitRatio, topn=3),
@@ -36,6 +50,16 @@ class Main:
         self.best_results = {}
         self.data_loaded = False
         self.env_built = False
+
+    def update_config(self, config: dict):
+        for key, value in config.items():
+            if isinstance(value, dict):
+                if key in self.config:
+                    self.config[key].update(value)
+                else:
+                    self.config[key] = value
+            else:
+                self.config[key] = value
 
     def init(self, config=None):
         if config is not None:
@@ -80,7 +104,7 @@ class Main:
     def build_env(self, graph_config, build_matrix=True):
         self.config['graph'] = graph_config
         self_loop_id = None
-        if graph_config.get('add_self_loop', False):
+        if graph_config['add_self_loop']:
             self.relation_dict['SELF_LOOP'] = len(self.relation_dict)
             self_loop_id = self.relation_dict['SELF_LOOP']
         self.reverse_relation = [self.relation_dict[inverse_relation(relation)] for relation in self.id2relation]
@@ -90,7 +114,7 @@ class Main:
                                validate_tasks=(self.valid_support, self.valid_eval),
                                test_tasks=(self.test_support, self.test_eval),
                                id2entity=self.id2entity, id2relation=self.id2relation, rel2candidate=self.rel2candidate,
-                               fact_dist=self.fact_dist, **self.config.get('trainer', {}))
+                               fact_dist=self.fact_dist, **self.config['trainer'])
         self.env_built = True
 
     def load_model(self, path, batch_id):
@@ -138,7 +162,7 @@ class Main:
                                          padding_idx=len(self.entity_dict))
         relation_embeddings = nn.Embedding(len(self.relation_dict) + 1, model_config['embed_size'],
                                            padding_idx=len(self.relation_dict))
-        self.summary = Summary(model_config.get('hidden_size', model_config['embed_size']), graph=self.kg,
+        self.summary = Summary(model_config['hidden_size'], graph=self.kg,
                                entity_embeddings=entity_embeddings, relation_embeddings=relation_embeddings).to(
             self.device)
 
@@ -147,14 +171,14 @@ class Main:
         self.cogKR = CogKR(graph=self.kg, entity_dict=self.entity_dict, relation_dict=self.relation_dict,
                            device=self.device, sparse_embed=self.sparse_embed, id2entity=self.id2entity,
                            id2relation=self.id2relation,
-                           use_summary=self.config['trainer'].get('meta_learn', True), **model_config).to(self.device)
+                           use_summary=self.config['trainer']['meta_learn'], **model_config).to(self.device)
         self.agent = self.cogKR.agent
         self.coggraph = self.cogKR.cog_graph
         self.summary = self.cogKR.summary
 
     def build_pretrain_optimiaer(self, optimizer_config):
         self.config['pretrain_optimizer'] = optimizer_config
-        if self.config['pretrain'].get('keep_embed', False):
+        if self.config['pretrain']['keep_embed']:
             print("Keep embedding")
             self.summary.entity_embeddings.weight.requires_grad_(False)
             self.summary.relation_embeddings.weight.requires_grad_(False)
@@ -188,7 +212,7 @@ class Main:
             sparse_ids.update(map(id, self.cogKR.entity_embeddings.parameters()))
             sparse_ids.update(map(id, self.cogKR.relation_embeddings.parameters()))
         self.dense_parameters = list(filter(lambda x: id(x) not in sparse_ids, self.parameters))
-        print(list(map(lambda x:x.size(), self.dense_parameters)))
+        print(list(map(lambda x: x.size(), self.dense_parameters)))
         self.optim_params.extend([{
             'params': self.summary_parameters,
             **optimizer_config['summary'],
@@ -197,7 +221,7 @@ class Main:
                                                                                 **optimizer_config['config'])
         self.total_graph_loss = 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
-        self.entropy_beta = self.config['train'].get('entropy_beta', 0.0)
+        self.entropy_beta = self.config['train']['entropy_beta']
         print("Entropy beta: ", self.entropy_beta)
 
     def save_state(self, is_best=False):
@@ -224,8 +248,8 @@ class Main:
             results = multi_mean_measure(
                 self.trainer.evaluate_generator(self.cogKR, self.trainer.evaluate(mode=mode, **kwargs),
                                                 save_result=output,
-                                                save_graph=save_graph, batch_size=self.config['train'].get('test_batch_size', 32)),
-                self.measure_dict)
+                                                save_graph=save_graph,
+                                                batch_size=self.config['train']['test_batch_size']), self.measure_dict)
             if self.args.inference_time:
                 print(time.time() - current)
             self.cogKR.train()
@@ -234,7 +258,12 @@ class Main:
     def build_logger(self, log_directory=None, batch_id=None):
         self.log_directory = log_directory
         if self.log_directory is None:
-            self.log_directory = os.path.join(self.root_directory, "log", "{}-{}-{}-{}-{}-{}".format(time.strftime("%m-%d-%H"), self.config['model']['max_steps'], self.config['model']['topk'], self.config['model']['reward_policy'], self.config['model']['use_rnn'], self.comment))
+            self.log_directory = os.path.join(self.root_directory, "log",
+                                              "{}-{}-{}-{}-{}-{}".format(time.strftime("%m-%d-%H"),
+                                                                         self.config['model']['max_steps'],
+                                                                         self.config['model']['topk'],
+                                                                         self.config['model']['reward_policy'],
+                                                                         self.config['model']['use_rnn'], self.comment))
             if not os.path.exists(self.log_directory):
                 os.makedirs(self.log_directory)
             serialize(self.config, os.path.join(self.log_directory, 'config.json'), in_json=True)
@@ -267,11 +296,11 @@ class Main:
             self.optimizer.step()
 
             self.predict_loss += loss.item()
-            if (batch_id + 1) % self.config['pretrain'].get('log_interval', 1000) == 0:
+            if (batch_id + 1) % self.config['pretrain']['log_interval'] == 0:
                 self.logger.info("predict loss: {}".format(self.predict_loss))
                 self.writer.add_scalar('predict_loss', self.predict_loss / 1000, batch_id)
                 self.predict_loss = 0.0
-            if (batch_id + 1) % self.config['pretrain'].get('evaluate_interval', 10000) == 0:
+            if (batch_id + 1) % self.config['pretrain']['evaluate_interval'] == 0:
                 torch.save(self.summary.state_dict(), os.path.join(self.log_directory,
                                                                    'summary.' + str(batch_id + 1) + ".dict"))
             if single_step:
@@ -282,13 +311,13 @@ class Main:
         self.writer.add_scalar('graph_loss', self.total_graph_loss / interval, self.batch_id)
         self.writer.add_scalar('reward', self.total_reward / interval, self.batch_id)
         self.writer.add_scalar('graph_size', self.total_graph_size / interval, self.batch_id)
-        self.logger.info("[Step: {}] Loss: {}, Reward: {}".format(self.batch_id + 1, self.total_graph_loss, self.total_reward / interval))
+        self.logger.info("[Step: {}] Loss: {}, Reward: {}".format(self.batch_id + 1, self.total_graph_loss,
+                                                                  self.total_reward / interval))
         self.total_graph_loss, self.total_graph_size, self.total_reward = 0.0, 0, 0.0
 
     def train(self, single_step=False):
-        meta_learn = self.config.get('trainer', {}).get('meta_learn', True)
-        validate_metric = self.config.get('train', {}).get('validate_metric', 'MAP')
-        # self.logger.info('Graph loss weight: {}'.format(self.config['train'].get('graph_weight', 1.0)))
+        meta_learn = self.config['trainer']['meta_learn']
+        validate_metric = self.config['train']['validate_metric']
         for self.batch_id in tqdm.tqdm(self.batch_sampler):
             if 'max_steps' in self.config['train'] and self.batch_id > self.config['train']['max_steps']:
                 break
@@ -296,10 +325,10 @@ class Main:
                 self.config['train']['batch_size'])
             if meta_learn:
                 graph_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
-                                                    support_pairs=support_pairs, evaluate=False)
+                                                      support_pairs=support_pairs, evaluate=False)
             else:
                 graph_loss, entropy_loss = self.cogKR(query_heads, other_correct_answers, end_entities=query_tails,
-                                                    relations=relations, evaluate=False)
+                                                      relations=relations, evaluate=False)
             self.optimizer.zero_grad()
             if self.sparse_embed:
                 self.embed_optimizer.zero_grad()
@@ -308,7 +337,7 @@ class Main:
             self.optimizer.step()
             if self.sparse_embed:
                 self.embed_optimizer.step()
-            if torch.isnan(graph_loss) :
+            if torch.isnan(graph_loss):
                 break
             else:
                 self.total_graph_loss += graph_loss.item()
@@ -326,8 +355,9 @@ class Main:
                     update = False
                     for key, value in test_results.items():
                         self.writer.add_scalar(key, value, self.batch_id)
-                    if validate_metric not in self.best_results or validate_results[validate_metric] >= self.best_results[
-                        validate_metric]:
+                    if validate_metric not in self.best_results or validate_results[validate_metric] >= \
+                            self.best_results[
+                                validate_metric]:
                         self.logger.info("Test results: {}".format(test_results))
                         self.save_state(is_best=True)
                     for key, value in validate_results.items():
@@ -374,7 +404,7 @@ class Main:
             graph.add_edges_from(deleted_edges)
         return fact_dist
 
-    def get_dist_dict(self, mode='test' ):
+    def get_dist_dict(self, mode='test'):
         self.graph = self.kg.to_networkx(multi=False)
         global_dist_count = defaultdict(int)
         fact_dist = {}
@@ -432,9 +462,10 @@ class Main:
         facts_data = list(filter(lambda x: not self.id2relation[x[1]].endswith("_inv"), self.facts_data))
         facts_data = list(
             map(lambda x: (self.id2entity[x[0]], self.id2relation[x[1]], self.id2entity[x[2]]), facts_data))
-        supports = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation, (head, tail) in
+        supports = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation, (head, tail)
+                    in
                     self.trainer.test_support.items()]
-        facts_data = list(itertools.chain(facts_data,supports))
+        facts_data = list(itertools.chain(facts_data, supports))
         valid_evaluate = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation in
                           self.trainer.validate_relations for head, tail in self.trainer.test_ground[relation]]
         test_evaluate = [(self.id2entity[head], self.id2relation[relation], self.id2entity[tail]) for relation in
@@ -485,6 +516,7 @@ class Main:
 if __name__ == "__main__":
     # Parse arguments
     from parse_args import args
+
     device = torch.device('cuda:{}'.format(args.gpu))
     torch.set_num_threads(args.num_threads)
     os.environ['MKL_NUM_THREADS'] = str(args.num_threads)
@@ -492,8 +524,9 @@ if __name__ == "__main__":
     os.environ['OMP_NUM_THREADS'] = str(args.num_threads)
     main_body = Main(args, root_directory=args.directory, device=device, comment=args.comment)
     if args.config:
-        main_body.config = unserialize(args.config)
-    main_body.sparse_embed = main_body.config.get('sparse_embed', False)
+        main_body.update_config(unserialize(args.config))
+    print(main_body.config)
+    main_body.sparse_embed = main_body.config['sparse_embed']
     main_body.load_data()
     main_body.build_env(main_body.config['graph'])
     if args.save_minerva:
@@ -561,9 +594,9 @@ if __name__ == "__main__":
                 main_body.build_optimizer(main_body.config['optimizer'])
                 if args.load_embed:
                     entity_embed_path = os.path.join(args.directory, "data",
-                                                        ".".join(('entity2vec', args.load_embed)))
+                                                     ".".join(('entity2vec', args.load_embed)))
                     relation_embed_path = os.path.join(args.directory, "data",
-                                                        ".".join(('relation2vec', args.load_embed)))
+                                                       ".".join(('relation2vec', args.load_embed)))
                     main_body.logger.info("Load Entity Embeddings from {}".format(entity_embed_path))
                     main_body.logger.info("Load Relation Embeddings from {}".format(relation_embed_path))
                     load_embedding(main_body.cogKR, entity_embed_path, relation_embed_path)
