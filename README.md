@@ -1,12 +1,152 @@
 # CogKR
-
-### [arXiv](https://arxiv.org/abs/1906.05489)
-
-Cognitive Knowledge Graph Reasoning for One-shot Relational Learning
-
-Zhengxiao Du, Chang Zhou, Ming Ding, Hongxia Yang, Jie Tang
-
 **Under construction**.
+
+## Results
+<table>
+   <tr>
+      <td></td>
+      <td>FB15K-237</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td>WN18RR</td>
+      <td></td>
+      <td></td>
+      <td></td>
+   </tr>
+   <tr>
+      <td>Model</td>
+      <td>Hits@1</td>
+      <td>Hits@3</td>
+      <td>Hits@10</td>
+      <td>MRR</td>
+      <td>Hits@1</td>
+      <td>Hits@3</td>
+      <td>Hits@10</td>
+      <td>MRR</td>
+   </tr>
+   <tr>
+      <td>TransE </td>
+      <td> - </td>
+      <td> - </td>
+      <td>46.5</td>
+      <td>29.4</td>
+      <td> - </td>
+      <td> </td>
+      <td>50.1</td>
+      <td>22.6</td>
+   </tr>
+   <tr>
+      <td>DistMult </td>
+      <td>20.6</td>
+      <td>31.8</td>
+      <td> - </td>
+      <td>29</td>
+      <td>38.4</td>
+      <td>42.4</td>
+      <td> - </td>
+      <td>41.3</td>
+   </tr>
+   <tr>
+      <td>ComplEx </td>
+      <td>20.8</td>
+      <td>32.6</td>
+      <td> - </td>
+      <td>29.6</td>
+      <td>38.5</td>
+      <td>43.9</td>
+      <td> - </td>
+      <td>42.2</td>
+   </tr>
+   <tr>
+      <td>ConvE </td>
+      <td>23.7</td>
+      <td>35.6</td>
+      <td>50.1</td>
+      <td>32.5</td>
+      <td>40</td>
+      <td>44</td>
+      <td>52</td>
+      <td>43</td>
+   </tr>
+   <tr>
+      <td>RotatE </td>
+      <td>24.1</td>
+      <td>37.5</td>
+      <td>53.3</td>
+      <td>33.8</td>
+      <td>42.8</td>
+      <td>49.2</td>
+      <td>57.1</td>
+      <td>47.6</td>
+   </tr>
+   <tr>
+      <td>TuckER </td>
+      <td>26.6</td>
+      <td>39.4</td>
+      <td>54.4</td>
+      <td>35.8</td>
+      <td>44.3</td>
+      <td>48.2</td>
+      <td>52.6</td>
+      <td>47</td>
+   </tr>
+   <tr>
+      <td>NeuralLP </td>
+      <td>18.2</td>
+      <td>27.2</td>
+      <td> - </td>
+      <td>24.9</td>
+      <td>37.2</td>
+      <td>43.4</td>
+      <td> - </td>
+      <td>43.5</td>
+   </tr>
+   <tr>
+      <td>MINERVA </td>
+      <td>21.7</td>
+      <td>32.9</td>
+      <td>45.6</td>
+      <td>29.3</td>
+      <td>41.3</td>
+      <td>45.6</td>
+      <td>51.3</td>
+      <td>44.8</td>
+   </tr>
+   <tr>
+      <td>M-Walk </td>
+      <td>16.5</td>
+      <td>24.3</td>
+      <td> - </td>
+      <td>23.2</td>
+      <td>41.4</td>
+      <td>44.5</td>
+      <td> - </td>
+      <td>43.7</td>
+   </tr>
+   <tr>
+      <td>DPMPN </td>
+      <td>28.6</td>
+      <td>40.3</td>
+      <td>53</td>
+      <td>36.9</td>
+      <td>44.4</td>
+      <td>49.7</td>
+      <td>55.8</td>
+      <td>48.2</td>
+   </tr>
+   <tr>
+      <td>CogKR </td>
+      <td>34.5</td>
+      <td>47.3</td>
+      <td>59.3</td>
+      <td>42.6</td>
+      <td>45.9</td>
+      <td>50.8</td>
+      <td>55.7</td>
+      <td>49.1</td>
+   </tr>
+</table>
 
 ## Prerequisites
 
