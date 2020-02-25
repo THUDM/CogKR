@@ -10,6 +10,7 @@ from networkx.algorithms.shortest_paths.generic import shortest_path_length
 import math
 import numpy as np
 import io
+import random
 import pdb
 
 
@@ -666,7 +667,16 @@ class CogKR(nn.Module):
                 raise NotImplemented
         else:
             if self.reward_policy == 'direct':
+                # Unbiased evaluation protocol
+                # Zhiqing Sun, Shikhar Vashishth, Soumya Sanyal, Partha P. Talukdar, Yiming Yang:
+                # A Re-evaluation of Knowledge Graph Completion Methods. CoRR abs/1911.03903 (2019)
+                # https://arxiv.org/pdf/1911.03903.pdf
+                rand_idxs = list(range(self.entity_num))
+                random.shuffle(rand_idxs)
+                entity_list = torch.arange(self.entity_num, device=device)[rand_idxs]
+                attention = attention[:, rand_idxs]
                 scores, results = attention.topk(dim=-1, k=20)
+                results = entity_list[results]
                 results = results.tolist()
                 scores = scores.tolist()
                 return results, scores
