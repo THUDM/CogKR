@@ -671,6 +671,7 @@ class CogKR(nn.Module):
                 # Zhiqing Sun, Shikhar Vashishth, Soumya Sanyal, Partha P. Talukdar, Yiming Yang:
                 # A Re-evaluation of Knowledge Graph Completion Methods. CoRR abs/1911.03903 (2019)
                 # https://arxiv.org/pdf/1911.03903.pdf
+                # TODO this will make Wiki-One slow
                 rand_idxs = list(range(self.entity_num))
                 random.shuffle(rand_idxs)
                 entity_list = torch.arange(self.entity_num, device=device)[rand_idxs]
