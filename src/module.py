@@ -266,7 +266,7 @@ class CogGraph:
 
 class Agent(nn.Module):
     def __init__(self, entity_embeddings: nn.Embedding, relation_embeddings: nn.Embedding, max_nodes: int,
-                 embed_size: int, hidden_size: int, query_size: int, message: bool):
+                 embed_size: int, hidden_size: int, query_size: int, message: bool, entity_embed: bool):
         nn.Module.__init__(self)
         self.embed_size = embed_size
         self.hidden_size = hidden_size
@@ -278,6 +278,7 @@ class Agent(nn.Module):
         self.entity_embeddings = entity_embeddings
         self.relation_embeddings = relation_embeddings
         self.use_message = message
+        self.use_entity_embed = entity_embed
         if self.use_message:
             self.hiddenRNN = nn.GRUCell(input_size=2 * self.embed_size, hidden_size=self.hidden_size)
         else:
@@ -389,7 +390,10 @@ class Agent(nn.Module):
         batch_index = torch.arange(batch_size, device=current_nodes.device).unsqueeze(1)
         # (batch_size, embed_size) get the hidden representations of current nodes
         current_representations = self.node_embeddings[batch_index, current_nodes]
-        current_embeddings = self.entity_embeddings(current_entities)
+        if self.use_entity_embed:
+            current_embeddings = self.entity_embeddings(current_entities)
+        else:
+            current_embeddings = current_representations.new_zeros((batch_size, rollout_num, self.embed_size))
         # concatenate the hidden states with query embeddings
         current_embeddings = torch.cat(
             (current_representations, self.query_representations.unsqueeze(1).expand(batch_size, rollout_num, -1),
@@ -398,7 +402,10 @@ class Agent(nn.Module):
         # (batch_size, rollout_num, max_neighbors, hidden_size) get the node representations of candidates
         node_embeddings = self.node_embeddings[batch_index.unsqueeze(-1), candidate_nodes]
         # (batch_size, rollout_num, max_neighbors, embed_size) get the entity embeddings of candidates
-        entity_embeddings = self.entity_embeddings(candidate_entities)
+        if self.use_entity_embed:
+            entity_embeddings = self.entity_embeddings(candidate_entities)
+        else:
+            entity_embeddings = node_embeddings.new_zeros((batch_size, rollout_num, max_neighbors, self.embed_size))
         # (batch_size, rollout_num, max_neighbors, embed_size) get the relation embeddings of candidates
         relation_embeddings = self.relation_embeddings(candidate_relations)
         # (batch_size, max_neighbors, 2 * embed_size + hidden_size) concatenated representations
@@ -424,7 +431,7 @@ class CogKR(nn.Module):
                  max_neighbors: int,
                  embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True,
                  baseline_lambda=0.0, onlyS=False, update_hidden=True,
-                 message=True, sparse_embed=False, id2entity=None, id2relation=None):
+                 message=True,  entity_embed=True, sparse_embed=False, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
         self.entity_dict = entity_dict
@@ -456,7 +463,7 @@ class CogKR(nn.Module):
             query_size = embed_size
             print("Not use summary module")
         self.agent = Agent(self.entity_embeddings, self.relation_embeddings, self.max_nodes, self.embed_size,
-                           self.hidden_size, query_size=query_size, message=message)
+                           self.hidden_size, query_size=query_size, message=message, entity_embed=entity_embed)
         if self.onlyS:
             self.loss = nn.MarginRankingLoss(margin=1.0)
         else:

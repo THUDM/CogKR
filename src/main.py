@@ -37,7 +37,8 @@ class Main:
                 "evaluate_interval": 10000
             },
             'model': {
-              'message': True
+                'message': True,
+                'entity_embed': True
             },
             "sparse_embed": False
         }
