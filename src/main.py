@@ -36,6 +36,9 @@ class Main:
                 "log_interval": 1000,
                 "evaluate_interval": 10000
             },
+            'model': {
+              'message': True
+            },
             "sparse_embed": False
         }
         self.measure_dict = {
@@ -263,7 +266,7 @@ class Main:
                                                                          self.config['model']['max_steps'],
                                                                          self.config['model']['topk'],
                                                                          self.config['model']['reward_policy'],
-                                                                         self.config['model']['use_rnn'], self.comment))
+                                                                         self.config['model']['message'], self.comment))
             if not os.path.exists(self.log_directory):
                 os.makedirs(self.log_directory)
             serialize(self.config, os.path.join(self.log_directory, 'config.json'), in_json=True)

@@ -4,7 +4,7 @@
     "add_self_loop": true
   },
   "model": {
-    "use_rnn": true,
+    "message": true,
     "max_steps": 3,
     "max_nodes": 50,
     "max_neighbors": 10,
