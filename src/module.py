@@ -418,19 +418,6 @@ class Agent(nn.Module):
         node_scores = self.rank_activation(node_scores)
         return node_scores
 
-    def rank(self):
-        """
-        :return:
-        """
-        node_embeddings = self.node_embeddings[:, :self.max_nodes]
-        # node_embeddings = torch.cat(
-        #     (self.node_embeddings[:, :1].expand(-1, self.max_nodes, -1), node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
-        node_embeddings = torch.cat(
-            (node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
-        node_scores = self.rank_layer(node_embeddings).squeeze(-1)
-        node_scores = self.rank_activation(node_scores)
-        return node_scores
-
 
 class CogKR(nn.Module):
     def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int,
@@ -474,15 +461,9 @@ class CogKR(nn.Module):
             self.loss = nn.MarginRankingLoss(margin=1.0)
         else:
             self.loss = nn.CrossEntropyLoss(reduction='sum')
-        self.statistician = False
-        self.statistics = {'graph_size': []}
         self.reward_policy = reward_policy
         self.reward_baseline = 0.0
         self.baseline_lambda = baseline_lambda
-
-    def clear_statistics(self):
-        for value in self.statistics.values():
-            value.clear()
 
     def find_correct_tails(self, node_lists, end_entities, only_last=False):
         assert len(node_lists) == len(end_entities)
