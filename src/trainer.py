@@ -224,15 +224,19 @@ class Trainer:
                 start_entities = [data[0] for data in batch] * self.test_rollout_num
                 tail_entities = [data[1] for data in batch] * self.test_rollout_num
                 other_correct_answers = [item for item in ground] * self.test_rollout_num
+                if candidates is not None:
+                    cur_candidates = candidates | set(tail_entities)
+                else:
+                    cur_candidates = candidates
                 if self.meta_learn:
                     results, scores = module(start_entities, other_correct_answers=other_correct_answers,
                                              support_pairs=[support_pair], evaluate=True,
-                                             candidates=candidates | set(tail_entities), end_entities=tail_entities)
+                                             candidates=cur_candidates, end_entities=tail_entities)
                 else:
                     relations = [relation_id]
                     results, scores = module(start_entities, other_correct_answers=other_correct_answers,
                                              relations=relations, evaluate=True,
-                                             candidates=candidates | set(tail_entities), end_entities=tail_entities)
+                                             candidates=cur_candidates, end_entities=tail_entities)
                 if save_graph:
                     reason_paths = module.get_correct_path(tail_entities, return_graph=True)
                     for batch_id in range(len(batch)):
