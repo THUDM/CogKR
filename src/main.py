@@ -142,6 +142,7 @@ class Main:
         if train:
             self.build_optimizer(self.config['optimizer'])
             self.optimizer.load_state_dict(state['optimizer'])
+            self.scheduler.load_state_dict(state['scheduler'])
             self.log_directory = os.path.dirname(path)
             if 'batch_id' in state:
                 self.batch_id = state['batch_id']
@@ -223,6 +224,7 @@ class Main:
         }, {'params': self.agent_parameters, **optimizer_config['agent']}])
         self.optimizer = torch.optim.__getattribute__(optimizer_config['name'])(self.optim_params,
                                                                                 **optimizer_config['config'])
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.3, patience=10, verbose=True, min_lr=1e-6)
         self.total_graph_loss = 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
         self.entropy_beta = self.config['train']['entropy_beta']
@@ -237,6 +239,7 @@ class Main:
             'config': self.config,
             'model': self.cogKR.state_dict(),
             'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
             'batch_id': self.batch_id + 1,
             'graph_loss': self.total_graph_loss,
             'reward': self.total_reward,
@@ -356,7 +359,7 @@ class Main:
                     test_results = self.evaluate_model(mode='test')
                     validate_results = self.evaluate_model(mode='valid')
                     self.logger.info("Validate results: {}".format(validate_results))
-                    update = False
+                    self.scheduler.step(validate_results[validate_metric])
                     for key, value in test_results.items():
                         self.writer.add_scalar(key, value, self.batch_id)
                     if validate_metric not in self.best_results or validate_results[validate_metric] >= \
