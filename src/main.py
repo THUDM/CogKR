@@ -40,7 +40,13 @@ class Main:
                 'message': True,
                 'entity_embed': True
             },
-            "sparse_embed": False
+            "sparse_embed": False,
+            "optimizer": {
+                "scheduler": {
+                    "factor": 0.3,
+                    "patience": 10
+                }
+            }
         }
         self.measure_dict = {
             'Hit1': functools.partial(hitRatio, topn=1),
@@ -224,7 +230,7 @@ class Main:
         }, {'params': self.agent_parameters, **optimizer_config['agent']}])
         self.optimizer = torch.optim.__getattribute__(optimizer_config['name'])(self.optim_params,
                                                                                 **optimizer_config['config'])
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.3, patience=10, verbose=True, min_lr=1e-6)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', verbose=True, min_lr=1e-6, **optimizer_config['scheduler'])
         self.total_graph_loss = 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
         self.entropy_beta = self.config['train']['entropy_beta']
