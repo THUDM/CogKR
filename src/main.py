@@ -179,6 +179,7 @@ class Main:
 
     def build_model(self, model_config):
         self.config['model'] = model_config
+        self.stochastic_policy = model_config['reward_policy'] == 'stochastic'
         self.cogKR = CogKR(graph=self.kg, entity_dict=self.entity_dict, relation_dict=self.relation_dict,
                            device=self.device, sparse_embed=self.sparse_embed, id2entity=self.id2entity,
                            id2relation=self.id2relation,
@@ -355,7 +356,7 @@ class Main:
             else:
                 self.total_graph_loss += graph_loss.item()
                 self.total_reward += self.cogKR.reward
-            if (self.batch_id + 1) % 200 == 0:
+            if self.stochastic_policy and (self.batch_id + 1) % 200 == 0:
                 self.entropy_beta *= 0.9
                 self.logger.info("Beta decay to: {}".format(self.entropy_beta))
             if (self.batch_id + 1) % self.config['train']['log_interval'] == 0:
