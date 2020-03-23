@@ -44,7 +44,8 @@ class Main:
             "optimizer": {
                 "scheduler": {
                     "factor": 0.3,
-                    "patience": 10
+                    "patience": 10,
+                    "min_lr": 1e-6
                 }
             }
         }
@@ -231,11 +232,12 @@ class Main:
         }, {'params': self.agent_parameters, **optimizer_config['agent']}])
         self.optimizer = torch.optim.__getattribute__(optimizer_config['name'])(self.optim_params,
                                                                                 **optimizer_config['config'])
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', verbose=True, min_lr=1e-6, **optimizer_config['scheduler'])
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', verbose=True, **optimizer_config['scheduler'])
         self.total_graph_loss = 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
         self.entropy_beta = self.config['train']['entropy_beta']
-        print("Entropy beta: ", self.entropy_beta)
+        if self.stochastic_policy:
+            print("Entropy beta: ", self.entropy_beta)
 
     def save_state(self, is_best=False):
         if is_best:
@@ -251,7 +253,7 @@ class Main:
             'graph_loss': self.total_graph_loss,
             'reward': self.total_reward,
             'graph_size': self.total_graph_size,
-            'log_file': self.log_file,
+            'log_file': self.summary_dir,
             'best_results': self.best_results
         }, filename)
 
@@ -281,12 +283,12 @@ class Main:
             if not os.path.exists(self.log_directory):
                 os.makedirs(self.log_directory)
             serialize(self.config, os.path.join(self.log_directory, 'config.json'), in_json=True)
-        self.log_file = os.path.join(self.log_directory, "log")
+        self.summary_dir = os.path.join(self.log_directory, "log")
         if batch_id is None:
-            self.writer = SummaryWriter(self.log_file)
+            self.writer = SummaryWriter(self.summary_dir)
             self.batch_sampler = itertools.count()
         else:
-            self.writer = SummaryWriter(self.log_file, purge_step=batch_id)
+            self.writer = SummaryWriter(self.summary_dir, purge_step=batch_id)
             self.batch_sampler = itertools.count(start=batch_id)
         self.logger = logging.getLogger()
         self.logger.setLevel(logging.INFO)
