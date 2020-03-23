@@ -166,7 +166,8 @@ class CogGraph:
         batch_index = torch.arange(self.batch_size, device=self.device)
         candidate_nodes, candidate_entities, candidate_relations = self.states[1]
         candidate_num = candidate_nodes.size(2)
-        rollout_ids, candidate_ids = (actions / candidate_num), actions.fmod(candidate_num)
+        if candidate_num > 0:
+            rollout_ids, candidate_ids = (actions / candidate_num), actions.fmod(candidate_num)
         aggregate_entities = []
         attend_entities = []
         action_nums = action_nums.tolist()
@@ -590,7 +591,8 @@ class CogKR(nn.Module):
                 final_scores = final_scores.reshape((batch_size, -1))
                 if step != self.max_steps - 1:
                     action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
-                    action_nums = (action_scores > 1e-10).sum(dim=1)
+                    action_masks = candidate_masks.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
+                    action_nums = ((action_scores > 1e-10) & action_masks).sum(dim=1)
                     action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
                     attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1,
                                                           dim_size=self.entity_num)
