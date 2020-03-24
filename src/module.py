@@ -151,7 +151,7 @@ class CogGraph:
             for batch_id in range(self.batch_size):
                 other_masks = np.isin(candidate_entities[batch_id].numpy(), self.other_correct_answers[batch_id],
                                       invert=True)
-                candidate_masks[batch_id] &= torch.from_numpy(other_masks).byte()
+                candidate_masks[batch_id] &= torch.from_numpy(other_masks).bool()
         return (current_nodes.to(self.device), current_entities.to(self.device), current_masks.to(self.device)), (
             candidate_nodes.to(self.device), candidate_entities.to(self.device), candidate_relations.to(self.device),
             candidate_masks.to(self.device))
