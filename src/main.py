@@ -59,6 +59,7 @@ class Main:
         }
         self.sparse_embed = sparse_embed
         self.best_results = {}
+        self.steps_no_improve = 0
         self.data_loaded = False
         self.env_built = False
 
@@ -163,6 +164,7 @@ class Main:
             self.total_graph_loss = state.get('graph_loss', 0.0)
             self.total_graph_size = state.get('graph_size', 0.0)
             self.total_reward = state.get('reward', 0.0)
+            self.steps_no_improve = state.get('steps_no_improve', 0)
 
     def load_pretrain(self, path):
         state_dict = torch.load(path)
@@ -254,7 +256,8 @@ class Main:
             'reward': self.total_reward,
             'graph_size': self.total_graph_size,
             'log_file': self.summary_dir,
-            'best_results': self.best_results
+            'best_results': self.best_results,
+            'steps_no_improve': self.steps_no_improve
         }, filename)
 
     def evaluate_model(self, mode='test', output=None, save_graph=None, **kwargs):
@@ -376,9 +379,14 @@ class Main:
                                 validate_metric]:
                         self.logger.info("Test results: {}".format(test_results))
                         self.save_state(is_best=True)
+                        self.steps_no_improve = 0
+                    else:
+                        self.steps_no_improve += self.config['train']['evaluate_interval']
                     for key, value in validate_results.items():
                         if key not in self.best_results or value > self.best_results[key]:
                             self.best_results[key] = value
+                if self.steps_no_improve > 10000:
+                    return
             self.local = locals()
             if single_step:
                 break
