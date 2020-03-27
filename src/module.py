@@ -659,15 +659,16 @@ class CogKR(nn.Module):
                 # A Re-evaluation of Knowledge Graph Completion Methods. CoRR abs/1911.03903 (2019)
                 # https://arxiv.org/pdf/1911.03903.pdf
                 # TODO this will make Wiki-One slow
-                rand_idxs = list(range(self.entity_num))
-                random.shuffle(rand_idxs)
-                entity_list = torch.arange(self.entity_num, device=device)[rand_idxs]
-                attention = attention[:, rand_idxs]
-                scores, results = attention.topk(dim=-1, k=20)
-                results = entity_list[results]
-                results = results.tolist()
-                scores = scores.tolist()
-                return results, scores
+                # rand_idxs = list(range(self.entity_num))
+                # random.shuffle(rand_idxs)
+                # entity_list = torch.arange(self.entity_num, device=device)[rand_idxs]
+                # attention = attention[:, rand_idxs]
+                # scores, results = attention.topk(dim=-1, k=20)
+                # results = entity_list[results]
+                # results = results.tolist()
+                # scores = scores.tolist()
+                # return results, scores
+                return attention
             elif self.reward_policy == 'stochastic':
                 results = current_entities.tolist()
                 scores = graph_loss.unsqueeze(-1).expand_as(current_entities).tolist()

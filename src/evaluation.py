@@ -52,6 +52,7 @@ def MRR(ground_truth, test_result):
     for i, item in enumerate(test_result):
         if item in ground_truth:
             return 1.0 / (i + 1)
+    return 0.0
 
 
 def get_mean_measure(measure_func):

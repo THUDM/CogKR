@@ -1,10 +1,11 @@
 import random, itertools
 import numpy as np
+import torch
 from tqdm import tqdm
 from grapher import KG
 from torch.utils.data import BatchSampler, SequentialSampler, WeightedRandomSampler, RandomSampler
 from utils import ListConcat, serialize
-from collections import defaultdict
+import pdb
 
 
 class Trainer:
@@ -191,7 +192,7 @@ class Trainer:
                 yield relation, support_pair, evaluate_pairs
                 self.graph.ignore_relations = None
 
-    def evaluate(self, specific_relation=None, mode='test', use_graph=True):
+    def evaluate(self, specific_relation=None, mode='test'):
         self.graph.eval()
         if specific_relation is None:
             if mode == 'test':
@@ -213,14 +214,14 @@ class Trainer:
             save_result = open(save_result, "w")
         if save_graph:
             self.reason_graphs = {}
-        for relation_id, support_pair, evaluate_data, ground_sets, *evaluate_graphs in tqdm(data_loader):
+        for relation_id, support_pair, evaluate_data, ground_sets in tqdm(data_loader):
             if relation_id in self.rel2candidate:
                 candidates = set(self.rel2candidate[relation_id])
             else:
                 candidates = None
-            for idx in BatchSampler(SequentialSampler(evaluate_data), batch_size=batch_size, drop_last=False):
-                batch = evaluate_data[idx[0]:idx[-1] + 1]
-                ground = ground_sets[idx[0]: idx[-1] + 1]
+            for idx_batch in BatchSampler(SequentialSampler(evaluate_data), batch_size=batch_size, drop_last=False):
+                batch = [evaluate_data[idx] for idx in idx_batch]
+                ground = [ground_sets[idx] for idx in idx_batch]
                 start_entities = [data[0] for data in batch] * self.test_rollout_num
                 tail_entities = [data[1] for data in batch] * self.test_rollout_num
                 other_correct_answers = [item for item in ground] * self.test_rollout_num
@@ -229,12 +230,12 @@ class Trainer:
                 else:
                     cur_candidates = candidates
                 if self.meta_learn:
-                    results, scores = module(start_entities, other_correct_answers=other_correct_answers,
+                    scores = module(start_entities, other_correct_answers=other_correct_answers,
                                              support_pairs=[support_pair], evaluate=True,
                                              candidates=cur_candidates, end_entities=tail_entities)
                 else:
                     relations = [relation_id]
-                    results, scores = module(start_entities, other_correct_answers=other_correct_answers,
+                    scores = module(start_entities, other_correct_answers=other_correct_answers,
                                              relations=relations, evaluate=True,
                                              candidates=cur_candidates, end_entities=tail_entities)
                 if save_graph:
@@ -244,27 +245,28 @@ class Trainer:
                             (self.id2entity[start_entities[batch_id]], self.id2relation[relation_id],
                              self.id2entity[tail_entities[batch_id]]))] = \
                             reason_paths[batch_id]
+                entity_num = scores.size(-1)
+                rand_idxs = list(range(entity_num))
+                random.shuffle(rand_idxs)
+                entity_list = torch.arange(entity_num, device=scores.device)[rand_idxs]
+                scores = scores.reshape((self.test_rollout_num, len(batch), entity_num)).sum(dim=0)
+                scores = scores[:, rand_idxs]
                 for batch_id in range(len(batch)):
-                    # use max-pooling
-                    entities = [entity for rollout_id in range(self.test_rollout_num) for entity in
-                                results[rollout_id * len(batch) + batch_id]]
-                    score = [score for rollout_id in range(self.test_rollout_num) for score in
-                             scores[rollout_id * len(batch) + batch_id]]
-                    sorted_indx = np.argsort(-np.array(score))
-                    seen, result = set(), []
-                    for r in sorted_indx:
-                        if entities[r] not in seen and entities[r] != batch[batch_id][0]:
-                            result.append(entities[r])
-                            seen.add(entities[r])
-                    # for rollout_id in range(self.test_rollout_num):
-                    #     result, score = results[rollout_id * len(batch) + batch_id], scores[rollout_id * len(batch) + batch_id]
-                    #     for j in range(len(result)):
-                    #         entity_scores[batch_id][result[j]] += score[j]
-                    # result = list(entity_scores[batch_id])
-                    # result = sorted(result, key=entity_scores[batch_id].get, reverse=True)
-                    result = list(filter(lambda x: x not in ground[batch_id] or x == batch[batch_id][1], result))
-                    if relation_id in self.rel2candidate:
-                        result = list(filter(lambda x: x in candidates or x == batch[batch_id][1], result))
+                    score = scores[batch_id]
+                    _, ranked = score.sort(dim=-1, descending=True)
+                    ranked = entity_list[ranked].tolist()
+                    result = []
+                    for entity in ranked:
+                        if len(result) > 20:
+                            break
+                        if entity == batch[batch_id][0]:
+                            continue
+                        if entity != batch[batch_id][1] and entity in ground[batch_id]:
+                            continue
+                        if relation_id in self.rel2candidate:
+                            if entity != batch[batch_id][1] and entity not in candidates:
+                                continue
+                        result.append(entity)
                     if save_result:
                         save_result.write("\t".join(
                             [self.id2entity[start_entities[batch_id]], self.id2relation[relation_id],

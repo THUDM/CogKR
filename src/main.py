@@ -245,7 +245,7 @@ class Main:
         if is_best:
             filename = os.path.join(self.log_directory, "best.state")
         else:
-            filename = os.path.join(self.log_directory, str(self.batch_id + 1) + ".state")
+            filename = os.path.join(self.log_directory, "latest.state")
         torch.save({
             'config': self.config,
             'model': self.cogKR.state_dict(),
@@ -367,6 +367,7 @@ class Main:
             if (self.batch_id + 1) % self.config['train']['log_interval'] == 0:
                 self.log()
             if (self.batch_id + 1) % self.config['train']['evaluate_interval'] == 0:
+                self.save_state(is_best=False)
                 with torch.no_grad():
                     test_results = self.evaluate_model(mode='test')
                     validate_results = self.evaluate_model(mode='valid')
