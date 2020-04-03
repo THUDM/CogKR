@@ -268,10 +268,9 @@ class Trainer:
                                 continue
                         result.append(entity)
                     if save_result:
-                        save_result.write("\t".join(
-                            [self.id2entity[start_entities[batch_id]], self.id2relation[relation_id],
-                             self.id2entity[batch[batch_id][1]]] + list(
-                                map(lambda x: self.id2entity[x], result))) + "\n")
+                        line = [self.id2entity[start_entities[batch_id]], self.id2relation[relation_id], self.id2entity[batch[batch_id][1]]]
+                        line += [self.id2entity[x] for x in result if x < len(self.id2entity)]
+                        save_result.write("\t".join(line) + "\n")
                     yield [batch[batch_id][1]], result
         if save_result:
             save_result.close()
