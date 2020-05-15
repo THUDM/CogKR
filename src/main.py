@@ -387,6 +387,7 @@ class Main:
                         if key not in self.best_results or value > self.best_results[key]:
                             self.best_results[key] = value
                 if self.steps_no_improve > 10000:
+                    self.logger.info(f"Training stops after no improvement step {self.steps_no_improve}")
                     return
             self.local = locals()
             if single_step:

@@ -167,7 +167,7 @@ class CogGraph:
         candidate_nodes, candidate_entities, candidate_relations = self.states[1]
         candidate_num = candidate_nodes.size(2)
         if candidate_num > 0:
-            rollout_ids, candidate_ids = (actions / candidate_num), actions.fmod(candidate_num)
+            rollout_ids, candidate_ids = (actions // candidate_num), actions.fmod(candidate_num)
         aggregate_entities = []
         attend_entities = []
         action_nums = action_nums.tolist()
@@ -596,7 +596,8 @@ class CogKR(nn.Module):
                     action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
                     attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1,
                                                           dim_size=self.entity_num)
-                    attention /= attention.sum(dim=-1, keepdim=True)
+                    # attention /= attention.sum(dim=-1, keepdim=True)
+                    attention = torch.nn.functional.normalize(attention, p=1, dim=-1)
                     aims, neighbors, currents = self.cog_graph.update(actions, action_nums)
                     current_entities, current_masks = currents
                     if self.update_hidden:
@@ -604,7 +605,8 @@ class CogKR(nn.Module):
                 else:
                     attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)),
                                                           dim=-1, dim_size=self.entity_num)
-                    attention /= attention.sum(dim=-1, keepdim=True)
+                    # attention /= attention.sum(dim=-1, keepdim=True)
+                    attention = torch.nn.functional.normalize(attention, p=1, dim=-1)
                     if end_entities is not None:
                         action_entities = candidate_entities.reshape((batch_size, -1))
                         final_scores = (action_entities == end_entities.unsqueeze(-1)).float()
