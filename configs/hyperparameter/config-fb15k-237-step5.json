@@ -4,12 +4,13 @@
     "add_self_loop": true
   },
   "model": {
+    "message": true,
     "max_steps": 5,
-    "max_nodes": 82,
+    "max_nodes": 260,
     "max_neighbors": 10,
     "embed_size": 100,
     "hidden_size": 200,
-    "topk": 16,
+    "topk": 64,
     "reward_policy": "direct",
     "baseline_lambda": 0.05
   },
@@ -40,11 +41,11 @@
     "test_rollout_num": 1
   },
   "train": {
-    "batch_size": 100,
-    "test_batch_size": 256,
+    "batch_size": 20,
+    "test_batch_size": 40,
     "log_interval": 50,
     "evaluate_interval": 300,
-    "max_steps": 10000,
+    "max_steps": 100000,
     "entropy_beta": 0.05
   },
   "pretrain": {

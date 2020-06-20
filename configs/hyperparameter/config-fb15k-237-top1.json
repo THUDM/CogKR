@@ -4,8 +4,8 @@
     "add_self_loop": true
   },
   "model": {
-    "max_steps": 3,
-    "max_nodes": 4,
+    "max_steps": 4,
+    "max_nodes": 5,
     "max_neighbors": 2,
     "embed_size": 100,
     "hidden_size": 200,
