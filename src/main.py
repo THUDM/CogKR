@@ -90,14 +90,24 @@ class Main:
         self.relation_dict = load_index(os.path.join(self.data_directory, "relation2id.txt"))
         self.facts_data = translate_facts(load_facts(os.path.join(self.data_directory, "train.txt")), self.entity_dict,
                                           self.relation_dict)
-        self.test_support = translate_facts(load_facts(os.path.join(self.data_directory, "test_support.txt")),
-                                            self.entity_dict, self.relation_dict)
-        self.valid_support = translate_facts(load_facts(os.path.join(self.data_directory, "valid_support.txt")),
-                                             self.entity_dict, self.relation_dict)
-        self.test_eval = translate_facts(load_facts(os.path.join(self.data_directory, "test_eval.txt")),
-                                         self.entity_dict, self.relation_dict)
-        self.valid_eval = translate_facts(load_facts(os.path.join(self.data_directory, "valid_eval.txt")),
-                                          self.entity_dict, self.relation_dict)
+        test_support = os.path.join(self.data_directory, "test_support.txt")
+        if os.path.exists(test_support):
+            self.test_support = translate_facts(load_facts(test_support), self.entity_dict, self.relation_dict)
+        else:
+            self.test_support = []
+        valid_support = os.path.join(self.data_directory, "valid_support.txt")
+        if os.path.exists(valid_support):
+            self.valid_support = translate_facts(load_facts(valid_support), self.entity_dict, self.relation_dict)
+        else:
+            self.valid_support = []
+        test_eval = os.path.join(self.data_directory, "test_eval.txt")
+        if not os.path.exists(test_eval):
+            test_eval = os.path.join(self.data_directory, "test.txt")
+        self.test_eval = translate_facts(load_facts(test_eval), self.entity_dict, self.relation_dict)
+        valid_eval = os.path.join(self.data_directory, "valid_eval.txt")
+        if not os.path.exists(valid_eval):
+            valid_eval = os.path.join(self.data_directory, "valid.txt")
+        self.valid_eval = translate_facts(load_facts(valid_eval), self.entity_dict, self.relation_dict)
         # augment
         with open(os.path.join(self.data_directory, 'pagerank.txt')) as file:
             self.pagerank = list(map(lambda x: float(x.strip()), file.readlines()))
@@ -234,7 +244,8 @@ class Main:
         }, {'params': self.agent_parameters, **optimizer_config['agent']}])
         self.optimizer = torch.optim.__getattribute__(optimizer_config['name'])(self.optim_params,
                                                                                 **optimizer_config['config'])
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', verbose=True, **optimizer_config['scheduler'])
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', verbose=True,
+                                                                    **optimizer_config['scheduler'])
         self.total_graph_loss = 0.0
         self.total_graph_size, self.total_reward = 0, 0.0
         self.entropy_beta = self.config['train']['entropy_beta']
@@ -542,6 +553,7 @@ class Main:
 if __name__ == "__main__":
     # Parse arguments
     from parse_args import args
+
     if args.gpu is not None:
         device = torch.device('cuda:{}'.format(args.gpu))
     else:
