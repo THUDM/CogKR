@@ -142,7 +142,7 @@ class Main:
             self.cogKR.load_state_dict(model_state)
 
     def load_state(self, path, train=True):
-        state = torch.load(path)
+        state = torch.load(path, map_location=self.device)
         if 'config' in state:
             self.config = state['config']
         self.build_model(self.config['model'])
@@ -542,8 +542,10 @@ class Main:
 if __name__ == "__main__":
     # Parse arguments
     from parse_args import args
-
-    device = torch.device('cuda:{}'.format(args.gpu))
+    if args.gpu is not None:
+        device = torch.device('cuda:{}'.format(args.gpu))
+    else:
+        device = torch.device("cpu")
     torch.set_num_threads(args.num_threads)
     os.environ['MKL_NUM_THREADS'] = str(args.num_threads)
     os.environ['NUMEXPR_NUM_THREADS'] = str(args.num_threads)

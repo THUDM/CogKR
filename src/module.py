@@ -146,7 +146,8 @@ class CogGraph:
         candidate_nodes = self.entity_translate[
             batch_index.unsqueeze(-1).unsqueeze(-1), candidate_entities]
         self.states = (
-        (current_nodes, current_entities, current_masks), (candidate_nodes, candidate_entities, candidate_relations))
+            (current_nodes, current_entities, current_masks),
+            (candidate_nodes, candidate_entities, candidate_relations))
         if last_step:
             for batch_id in range(self.batch_size):
                 other_masks = np.isin(candidate_entities[batch_id].numpy(), self.other_correct_answers[batch_id],
@@ -262,7 +263,7 @@ class CogGraph:
                         str(self.neighbor_matrix[batch_id, aggregate_entity,
                             :neighbors_num[batch_id, i]].tolist()) + "\n")
         return (aggregate_nodes, aggregate_entities, aggregate_nums), (neighbors, neighbors_num), (
-        attend_entities, attend_masks)
+            attend_entities, attend_masks)
 
 
 class Agent(nn.Module):
@@ -362,18 +363,19 @@ class Agent(nn.Module):
                 node_embeddings.reshape(batch_size * topk * max_neighbors, self.hidden_size))
             updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, self.hidden_size)
         # mask padding neighbors
-        masks = torch.arange(0, max_neighbors, device=neighbor_embeddings.device).view(1, 1,
-                                                                                       -1) >= neighbors_num.unsqueeze(
-            -1)
-        updated_embeddings = updated_embeddings.masked_fill(masks.unsqueeze(-1), 0.0)
-        # avoid division by zeros here
-        neighbors_num = neighbors_num.type(torch.float) + (neighbors_num == 0.0).type(torch.float)
-        updated_embeddings = updated_embeddings.sum(dim=2) / neighbors_num.unsqueeze(-1)
-        if not self.use_message:
-            updated_embeddings = torch.cat((updated_embeddings, entity_embeddings), dim=-1)
-            updated_embeddings = self.update_activation(self.update_layer(updated_embeddings))
-        # write the updated embeddings
-        self.node_embeddings[batch_index.unsqueeze(-1), aim_nodes] = updated_embeddings
+        if max_neighbors > 0:
+            masks = torch.arange(0, max_neighbors, device=neighbor_embeddings.device).view(1, 1,
+                                                                                           -1) >= neighbors_num.unsqueeze(
+                -1)
+            updated_embeddings = updated_embeddings.masked_fill(masks.unsqueeze(-1), 0.0)
+            # avoid division by zeros here
+            neighbors_num = neighbors_num.type(torch.float) + (neighbors_num == 0.0).type(torch.float)
+            updated_embeddings = updated_embeddings.sum(dim=2) / neighbors_num.unsqueeze(-1)
+            if not self.use_message:
+                updated_embeddings = torch.cat((updated_embeddings, entity_embeddings), dim=-1)
+                updated_embeddings = self.update_activation(self.update_layer(updated_embeddings))
+            # write the updated embeddings
+            self.node_embeddings[batch_index.unsqueeze(-1), aim_nodes] = updated_embeddings
 
     def next_hop(self, currents: tuple, candidates) -> (torch.Tensor, torch.Tensor):
         """
@@ -432,7 +434,7 @@ class CogKR(nn.Module):
                  max_neighbors: int,
                  embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True,
                  baseline_lambda=0.0, onlyS=False, update_hidden=True,
-                 message=True,  entity_embed=True, sparse_embed=False, id2entity=None, id2relation=None):
+                 message=True, entity_embed=True, sparse_embed=False, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
         self.entity_dict = entity_dict
@@ -617,7 +619,7 @@ class CogKR(nn.Module):
                 if not evaluate:
                     entropy = -(final_scores * torch.log(final_scores + 1e-10)).sum(dim=-1).mean()
                     entropy_loss += entropy
-                final_scores = final_scores.masked_fill(~current_masks.unsqueeze(-1), 0.0)
+                final_scores = final_scores.masked_fill(~current_masks.bool().unsqueeze(-1), 0.0)
                 final_scores = final_scores.reshape((batch_size, -1))
                 m = torch.distributions.multinomial.Multinomial(total_count=self.topk, probs=final_scores)
                 action_counts = m.sample()
