@@ -4,13 +4,12 @@
     "add_self_loop": true
   },
   "model": {
-    "message": true,
-    "max_steps": 5,
-    "max_nodes": 132,
-    "max_neighbors": 10,
-    "embed_size": 100,
-    "hidden_size": 200,
-    "topk": 32,
+    "max_steps": 3,
+    "max_nodes": 50,
+    "max_neighbors": 5,
+    "embed_size": 50,
+    "hidden_size": 100,
+    "topk": 16,
     "reward_policy": "direct",
     "baseline_lambda": 0.05
   },
@@ -36,19 +35,20 @@
     "weighted_sample": true,
     "ignore_onehop": false,
     "meta_learn": false,
-    "sample_weight": 1.0,
+    "sample_weight": 0.2,
     "rollout_num": 1,
     "test_rollout_num": 1
   },
   "train": {
-    "batch_size": 42,
-    "test_batch_size": 84,
+    "batch_size": 24,
+    "test_batch_size": 64,
     "log_interval": 50,
-    "evaluate_interval": 100,
-    "max_steps": 30000,
+    "evaluate_interval": 600,
+    "max_steps": 10000,
     "entropy_beta": 0.05
   },
   "pretrain": {
     "batch_size": 64
-  }
+  },
+  "sparse_embed": true
 }

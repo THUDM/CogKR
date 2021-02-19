@@ -1,18 +1,18 @@
 {
   "graph": {
     "train_width": 256,
-    "test_width": 2000
+    "add_self_loop": true
   },
   "model": {
-    "max_steps": 3,
-    "max_nodes": 4,
-    "max_neighbors": 1,
+    "message": true,
+    "max_steps": 4,
+    "max_nodes": 200,
+    "max_neighbors": 10,
     "embed_size": 100,
     "hidden_size": 200,
-    "topk": 1,
+    "topk": 64,
     "reward_policy": "direct",
-    "baseline_lambda": 0.02,
-    "use_rank": false
+    "baseline_lambda": 0.05
   },
   "optimizer": {
     "name": "Adam",
@@ -34,19 +34,19 @@
   },
   "trainer": {
     "weighted_sample": true,
-    "ignore_relation": false,
+    "ignore_onehop": true,
     "meta_learn": false,
     "sample_weight": 1.0,
-    "rollout_num": 16,
-    "test_rollout_num": 100
+    "rollout_num": 1,
+    "test_rollout_num": 1
   },
   "train": {
-    "batch_size": 128,
-    "test_batch_size": 64,
-    "log_interval": 200,
-    "evaluate_interval": 800,
-    "max_steps": 10000,
-    "entropy_beta": 0.02
+    "batch_size": 28,
+    "test_batch_size": 50,
+    "log_interval": 50,
+    "evaluate_interval": 300,
+    "max_steps": 100000,
+    "entropy_beta": 0.05
   },
   "pretrain": {
     "batch_size": 64

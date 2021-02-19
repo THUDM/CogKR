@@ -1,15 +1,17 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.distributions
+import torch_scatter
 import grapher
 from collections import deque
 from torch_utils import list2tensor
 import networkx
 from networkx.algorithms.shortest_paths.generic import shortest_path_length
 import math
-import random
+import numpy as np
 import io
-import statistics
+import random
+import pdb
 
 
 class Summary(nn.Module):
@@ -77,6 +79,7 @@ class CogGraph:
         self.node_pad = max_nodes
         self.node_pos_pad = max_nodes + 1
         self.entity_dict = entity_dict
+        self.entity_num = len(entity_dict) + 1
         self.id2entity = sorted(self.entity_dict.keys(), key=self.entity_dict.get)
         self.relation_dict = relation_dict
         self.id2relation = sorted(self.relation_dict.keys(), key=self.relation_dict.get)
@@ -86,14 +89,13 @@ class CogGraph:
         self.debug = False
         self.topk = topk
 
-    def init(self, start_entities: list, other_correct_answers, ground_graphs=None, evaluate=False):
+    def init(self, start_entities: list, other_correct_answers, evaluate=False):
         self.evaluate = evaluate
         self.batch_size = len(start_entities)
         # self.other_correct_answers = list2tensor(other_correct_answers, padding_idx=self.entity_pad, dtype=torch.long, device=self.device)
-        self.other_correct_answers = other_correct_answers
+        self.other_correct_answers = [np.array(list(answer_set)) for answer_set in other_correct_answers]
         batch_index = torch.arange(0, self.batch_size, dtype=torch.long)
         # each line is the head entity and relation type
-        self.ground_graphs = ground_graphs
         self.neighbor_matrix = torch.zeros(self.batch_size, self.max_nodes + 2, self.max_neighbors, 2, dtype=torch.long)
         # padding the neighbors
         self.neighbor_matrix[:, :, :, 0] = self.node_pad
@@ -105,7 +107,7 @@ class CogGraph:
         self.node_lists = [[start_entity] for start_entity in start_entities]
         # self.antecedents = [[set()] for _ in range(self.batch_size)]
         self.entity2node = [{start_entity: 0} for start_entity in start_entities]
-        self.entity_translate = torch.full((self.batch_size, len(self.entity_dict) + 1), fill_value=self.node_pad,
+        self.entity_translate = torch.full((self.batch_size, self.entity_num), fill_value=self.node_pad,
                                            dtype=torch.long)
         self.entity_translate[batch_index, start_entities] = 0
         self.current_nodes = [{0} for _ in range(self.batch_size)]
@@ -125,86 +127,65 @@ class CogGraph:
             graphs.append(graph)
         return graphs
 
-    def step(self, last_step=False):
+    def step(self, currents, last_step=False):
         """
-        :return ids of current entities (batch_size, )
-                candidates: node id (batch_size, max_neighbors, )
-                            entity id (batch_size, max_neighbors, )
-                            relation id (batch_size, max_neighbors, )
+        :return current: current entities (batch_size, rollout_num)
+                         current nodes (batch_size, rollout_num)
+                         current masks (batch_size, rollout_num)
+                candidates: node id (batch_size, rollout_num, max_neighbors, )
+                            entity id (batch_size, rollout_num, max_neighbors, )
+                            relation id (batch_size, rollout_num, max_neighbors, )
                 max_neighbors can be dynamic
         """
         batch_index = torch.arange(0, self.batch_size)
-        current_nodes, current_entities, current_antecedents = [], [], []
-        for batch_id in range(self.batch_size):
-            if len(self.node_lists[batch_id]) >= self.max_nodes or len(self.frontier_queues[batch_id]) == 0:
-                current_nodes.append(self.node_pad)
-                current_entities.append(self.entity_pad)
-                # current_antecedents.append([])
-                self.stop_states[batch_id] = True
-                if self.debug:
-                    self.debug_outputs[batch_id].write("search process stoped\n")
-            if self.stop_states[batch_id]:
-                continue
-            current_entity = self.frontier_queues[batch_id].popleft()
-            current_node = self.entity2node[batch_id][current_entity]
-            current_nodes.append(current_node)
-            current_entities.append(current_entity)
-            # if self.evaluate:
-            #     current_antecedents.append(self.antecedents[batch_id][current_node])
-            # else:
-            #     current_antecedents.append(list(self.antecedents[batch_id][current_node]))
-        current_nodes = torch.tensor(current_nodes, dtype=torch.long)
-        current_entities = torch.tensor(current_entities, dtype=torch.long)
-        candidates, candidate_masks, candidate_nums = self.graph.quick_edges(current_entities)
-        candidate_entities, candidate_relations = candidates[:, :, 0], candidates[:, :, 1]
+        current_entities, current_masks = currents
+        current_nodes = self.entity_translate[batch_index.unsqueeze(-1), current_entities]
+        # TODO change KG.quick_edges
+        candidates, candidate_masks = self.graph.quick_edges(current_entities.cpu())
+        candidate_entities, candidate_relations = candidates.select(-1, 0), candidates.select(-1, 1)
         candidate_nodes = self.entity_translate[
-            batch_index.unsqueeze(-1).expand_as(candidate_entities), candidate_entities]
-        self.states = (current_nodes, (candidate_nodes, candidate_entities, candidate_relations))
-        # current_antecedents = list2tensor(current_antecedents, padding_idx=self.entity_pad, dtype=torch.long,
-        #   device=self.device).unsqueeze(1)
-        candidate_entities = candidate_entities.to(self.device)
-        candidate_masks = candidate_masks.to(self.device)
+            batch_index.unsqueeze(-1).unsqueeze(-1), candidate_entities]
+        self.states = (
+            (current_nodes, current_entities, current_masks),
+            (candidate_nodes, candidate_entities, candidate_relations))
         if last_step:
             for batch_id in range(self.batch_size):
-                candidate_num = candidate_nums[batch_id].item()
-                for candidate_id in range(candidate_num):
-                    if candidate_entities[batch_id, candidate_id].item() in self.other_correct_answers[batch_id]:
-                        candidate_masks[batch_id, candidate_id] = 0
-            # candidate_masks &= ((candidate_entities.unsqueeze(-1) == self.other_correct_answers.unsqueeze(1)).sum(dim=-1) == 0)
-        # candidate_masks &= ((candidate_entities.unsqueeze(-1) == current_antecedents).sum(dim=-1) == 0)
-        return (current_nodes.to(self.device), current_entities.to(self.device)), (
+                other_masks = np.isin(candidate_entities[batch_id].numpy(), self.other_correct_answers[batch_id],
+                                      invert=True)
+                candidate_masks[batch_id] &= torch.from_numpy(other_masks).bool()
+        return (current_nodes.to(self.device), current_entities.to(self.device), current_masks.to(self.device)), (
             candidate_nodes.to(self.device), candidate_entities.to(self.device), candidate_relations.to(self.device),
             candidate_masks.to(self.device))
 
-    def update(self, actions, action_nums):
+    def update(self, actions: torch.LongTensor, action_nums: torch.LongTensor):
         """
-        :param actions: batch_size lists, each contains the next hop nodes of a current entity
+        :param actions: batch_size, topk, each contains the next hop nodes of a current entity
+        :param action_nums: batch_size
         :return: something to help update the hidden representations
         """
-        currents = self.states[0]
+        current_nodes, current_entities, current_masks = self.states[0]
         batch_index = torch.arange(self.batch_size, device=self.device)
         candidate_nodes, candidate_entities, candidate_relations = self.states[1]
-        aim_entities = []
+        candidate_num = candidate_nodes.size(2)
+        if candidate_num > 0:
+            rollout_ids, candidate_ids = (actions // candidate_num), actions.fmod(candidate_num)
+        aggregate_entities = []
+        attend_entities = []
         action_nums = action_nums.tolist()
         node_id_batch, neighbor_id_batch = [], []
         new_entity_data = [[], [], []]
         neighbor_nums = self.neighbor_nums.tolist()
         for batch_id, nexthops in enumerate(actions.tolist()):
-            head = currents[batch_id].item()
-            current_node = set()
-            aim_entity, node_ids, neighbor_ids = set(), [], []
-            for topn, action_id in enumerate(nexthops):
+            attend_entity, aggregate_entity, node_ids, neighbor_ids = set(), set(), [], []
+            for topn in range(len(nexthops)):
+                rollout_id, candidate_id = rollout_ids[batch_id, topn].item(), candidate_ids[batch_id, topn].item()
+                head = current_nodes[batch_id, rollout_id].item()
                 if head == self.node_pad or topn >= action_nums[batch_id]:
                     node_ids.append(self.node_pos_pad)
                     neighbor_ids.append(0)
                     continue
-                entity = candidate_entities[batch_id, action_id].item()
+                entity = candidate_entities[batch_id, rollout_id, candidate_id].item()
                 if entity not in self.entity2node[batch_id]:
-                    # avoid too many nodes
-                    if len(self.node_lists[batch_id]) >= self.max_nodes:
-                        node_ids.append(self.node_pos_pad)
-                        neighbor_ids.append(0)
-                        continue
                     self.entity2node[batch_id][entity] = len(self.node_lists[batch_id])
                     new_entity_data[0].append(batch_id)
                     new_entity_data[1].append(entity)
@@ -216,30 +197,32 @@ class CogGraph:
                     if self.debug:
                         self.debug_outputs[batch_id].write("New node added ")
                 # TODO should we revisit old nodes?
-                self.frontier_queues[batch_id].append(entity)
                 node_id = self.entity2node[batch_id][entity]
-                current_node.add(node_id)
+                attend_entity.add(entity)
+                # If self-loop, skip
+                if node_id == head:
+                    node_ids.append(self.node_pos_pad)
+                    neighbor_ids.append(0)
+                    continue
                 # TODO rewrite the last edge if overflow
                 if neighbor_nums[batch_id][node_id] >= self.max_neighbors:
-                    # node_ids.append(self.node_pos_pad)
-                    # neighbor_ids.append(0)
-                    # continue
-                    neighbor_nums[batch_id][node_id] -= 1                   
+                    node_ids.append(self.node_pos_pad)
+                    neighbor_ids.append(0)
+                    continue
                 neighbor_num = neighbor_nums[batch_id][node_id]
                 if self.debug:
-                    relation = candidate_relations[batch_id, action_id].item()
+                    relation = candidate_relations[batch_id, topn].item()
                     self.debug_outputs[batch_id].write(
                         "Node: {}, Entity:{}, Relation: {}\n".format(node_id, entity, relation))
-                aim_entity.add(entity)
+                aggregate_entity.add(entity)
                 node_ids.append(node_id)
                 neighbor_ids.append(neighbor_num)
                 neighbor_nums[batch_id][node_id] += 1
                 # update the antecedent information
                 # self.antecedents[batch_id][node_id].add(self.node_lists[batch_id][head])
                 # self.antecedents[batch_id][node_id].update(self.antecedents[batch_id][head])
-            if current_node:
-                self.current_nodes[batch_id] = current_node
-            aim_entities.append(list(aim_entity))
+            attend_entities.append(list(attend_entity))
+            aggregate_entities.append(list(aggregate_entity))
             node_id_batch.append(node_ids)
             neighbor_id_batch.append(neighbor_ids)
         # update the entity translate
@@ -248,32 +231,44 @@ class CogGraph:
         self.neighbor_nums = torch.tensor(neighbor_nums, dtype=torch.long)
         # set the neighbor matrix of added nodes
         # NO_OP will select the last relation, which is just the padding
-        update_relations = candidate_relations[batch_index.unsqueeze(-1), actions]
+        update_relations = candidate_relations[batch_index.unsqueeze(-1), rollout_ids, candidate_ids]
+        update_nodes = current_nodes[batch_index.unsqueeze(-1), rollout_ids]
         self.neighbor_matrix[batch_index.unsqueeze(-1), node_id_batch, neighbor_id_batch] = torch.stack(
-            (currents.unsqueeze(-1).expand_as(update_relations), update_relations), dim=-1)
-        aim_nodes = [list(map(self.entity2node[batch_id].get, aim_entities[batch_id])) for batch_id in
-                     range(self.batch_size)]
-        aim_nodes = list2tensor(aim_nodes, padding_idx=self.node_pos_pad, dtype=torch.long, device=self.device)
-        aim_nums = torch.tensor(list(map(len, aim_entities)), dtype=torch.long, device=self.device)
-        aim_entities = list2tensor(aim_entities, dtype=torch.long, device=self.device, padding_idx=self.entity_pad)
+            (update_nodes, update_relations), dim=-1)
+        aggregate_nodes = [list(map(self.entity2node[batch_id].get, aggregate_entities[batch_id])) for batch_id in
+                           range(self.batch_size)]
+        attend_nums = torch.tensor(list(map(len, attend_entities)), dtype=torch.long, device=self.device)
+        attend_entities = list2tensor(attend_entities, padding_idx=self.entity_pad, dtype=torch.long,
+                                      device=self.device)
+        attend_masks = torch.arange(attend_entities.size(-1), device=self.device).unsqueeze(0) < attend_nums.unsqueeze(
+            -1)
+        aggregate_nodes = list2tensor(aggregate_nodes, padding_idx=self.node_pos_pad, dtype=torch.long,
+                                      device=self.device)
+        aggregate_nums = torch.tensor(list(map(len, aggregate_entities)), dtype=torch.long, device=self.device)
+        aggregate_entities = list2tensor(aggregate_entities, dtype=torch.long, device=self.device,
+                                         padding_idx=self.entity_pad)
         # (batch_size, topk)
-        neighbors_num = self.neighbor_nums[batch_index.unsqueeze(-1).expand_as(aim_nodes), aim_nodes].to(self.device)
+        neighbors_num = self.neighbor_nums[batch_index.unsqueeze(-1), aggregate_nodes].to(self.device)
         # (batch_size, topk, max_neighbors) get the neighbors of aim
-        neighbors = self.neighbor_matrix[batch_index.unsqueeze(-1).expand_as(aim_nodes), aim_nodes].to(self.device)
+        max_neighbor_num = torch.max(neighbors_num)
+        neighbors = self.neighbor_matrix[batch_index.unsqueeze(-1), aggregate_nodes].to(self.device)
+        neighbors = neighbors[:, :, :max_neighbor_num]
         if self.debug:
             for batch_id in range(len(actions)):
                 self.debug_outputs[batch_id].write("Update aims:\n")
-                for i in range(aim_nums[batch_id].item()):
-                    aim_entity = aim_nodes[batch_id, i].item()
-                    self.debug_outputs[batch_id].write("Node: {} ".format(aim_entity))
+                for i in range(aggregate_nums[batch_id].item()):
+                    aggregate_entity = aggregate_nodes[batch_id, i].item()
+                    self.debug_outputs[batch_id].write("Node: {} ".format(aggregate_entity))
                     self.debug_outputs[batch_id].write(
-                        str(self.neighbor_matrix[batch_id, aim_entity, :neighbors_num[batch_id, i]].tolist()) + "\n")
-        return (aim_nodes, aim_entities, aim_nums), (neighbors, neighbors_num)
+                        str(self.neighbor_matrix[batch_id, aggregate_entity,
+                            :neighbors_num[batch_id, i]].tolist()) + "\n")
+        return (aggregate_nodes, aggregate_entities, aggregate_nums), (neighbors, neighbors_num), (
+            attend_entities, attend_masks)
 
 
 class Agent(nn.Module):
     def __init__(self, entity_embeddings: nn.Embedding, relation_embeddings: nn.Embedding, max_nodes: int,
-                 embed_size: int, hidden_size: int, query_size: int = None, use_rnn=True):
+                 embed_size: int, hidden_size: int, query_size: int, message: bool, entity_embed: bool):
         nn.Module.__init__(self)
         self.embed_size = embed_size
         self.hidden_size = hidden_size
@@ -281,22 +276,23 @@ class Agent(nn.Module):
         self.max_nodes = max_nodes
         if query_size is None:
             query_size = hidden_size
+        self.query_size = query_size
         self.entity_embeddings = entity_embeddings
         self.relation_embeddings = relation_embeddings
-        self.use_rnn = use_rnn
-        if self.use_rnn:
-            self.hiddenRNN = nn.GRUCell(input_size=2 * embed_size, hidden_size=hidden_size)
+        self.use_message = message
+        self.use_entity_embed = entity_embed
+        if self.use_message:
+            self.hiddenRNN = nn.GRUCell(input_size=2 * self.embed_size, hidden_size=self.hidden_size)
         else:
-            self.hidden_layer = nn.Linear(embed_size, hidden_size)
-            self.pass_layer = nn.Linear(embed_size + hidden_size, hidden_size)
-            self.pass_activation = nn.Sequential()
+            print("Not use RNN")
+            self.hiddenRNN = nn.GRUCell(input_size=self.embed_size, hidden_size=self.hidden_size)
+            self.update_layer = nn.Linear(self.embed_size + self.hidden_size, self.hidden_size)
             self.update_activation = nn.LeakyReLU()
-        self.nexthop_layer = nn.Linear(hidden_size + query_size + embed_size, hidden_size)
+        self.nexthop_layer = nn.Linear(self.hidden_size + self.query_size + self.embed_size, self.hidden_size)
         self.nexthop_activation = nn.LeakyReLU()
-        self.candidate_layer = nn.Linear(2 * embed_size + hidden_size, hidden_size)
+        self.candidate_layer = nn.Linear(2 * self.embed_size + self.hidden_size, self.hidden_size)
         self.candidate_activation = nn.LeakyReLU()
-        self.gate_layer = nn.Linear(hidden_size, 1)
-        self.rank_layer = nn.Linear(hidden_size + query_size, 1)
+        self.rank_layer = nn.Linear(self.hidden_size + self.query_size, 1)
         # this should combine with the loss function
         self.rank_activation = nn.Sequential()
         self.debug = False
@@ -318,32 +314,32 @@ class Agent(nn.Module):
         else:
             self.query_representations = torch.zeros(self.batch_size, self.embed_size, dtype=torch.float,
                                                      device=self.entity_embeddings.weight.device)
-        if self.use_rnn:
-            init_embeddings = torch.zeros(self.batch_size, self.hidden_size, device=start_entities.device)
-        else:
-            init_embeddings = self.entity_embeddings(start_entities)
-            init_embeddings = self.update_activation(self.hidden_layer(init_embeddings))
+        init_embeddings = torch.zeros(self.batch_size, self.hidden_size, device=start_entities.device)
+        if not self.use_message:
+            entity_embeddings = self.entity_embeddings(start_entities)
+            init_embeddings = torch.cat((init_embeddings, entity_embeddings), dim=-1)
+            init_embeddings = self.update_activation(self.update_layer(init_embeddings))
         self.node_embeddings[:, 0] = init_embeddings
         if self.debug:
             self.debug_outputs = [io.StringIO() for _ in range(self.batch_size)]
 
     def aggregate(self, aim_data, neighbor_data):
         """
-        :param aim_data: (batch_size, topk) ids of updated entities
+        :param aim_data: (batch_size, topk) ids of updated nodes, used to update hidden representations
+                         (batch_size, topk) ids of updated entities
                          (batch_size, ) number of aims
-                         (batch_size, topk) ids of updated nodes, used to update hidden representations
         :param neighbor_data: (batch_size, topk, max_neighbors, 2) node and relation type
                               (batch_size, topk) number of neighbors
         :return: None
         """
-        node_pos, aims, aims_num = aim_data
+        aim_nodes, aim_entities, aim_nums = aim_data
         neighbors, neighbors_num = neighbor_data
         batch_size, topk, max_neighbors = neighbors.size()[:3]
-        batch_index = torch.arange(batch_size, device=aims.device)
+        batch_index = torch.arange(batch_size, device=aim_entities.device)
         # resize the neighbors to gather representations
         neighbor_nodes, neighbor_relations = neighbors[:, :, :, 0], neighbors[:, :, :, 1]
         # (batch_size, topk, embed_size) get the entity embeddings of aims to update
-        entity_embeddings = self.entity_embeddings(aims)
+        entity_embeddings = self.entity_embeddings(aim_entities)
         # (batch_size, topk, max_neighbors, embed_size)
         # get the hidden representations and relation embeddings of neighbors
         node_embeddings = self.node_embeddings[batch_index.view(-1, 1, 1).expand_as(neighbor_nodes), neighbor_nodes]
@@ -351,70 +347,79 @@ class Agent(nn.Module):
         # resize to get the correct embedding shapes
         # node_embeddings = node_embeddings.view(batch_size, topk, max_neighbors, self.embed_size)
         # relation_embeddings = relation_embeddings.view(batch_size, topk, max_neighbors, self.embed_size)
-        if self.use_rnn:
+        if self.use_message:
             # (batch_size, topk, max_neighbors, 2 * embed_size) concatenated neighbor embeddings
-            neighbor_embeddings = torch.cat((entity_embeddings.unsqueeze(2), relation_embeddings), dim=-1)
-            updated_embeddings = self.hiddenRNN(neighbor_embeddings.reshape(batch_size * topk * max_neighbors, -1),
-                                                node_embeddings.reshape(batch_size * topk * max_neighbors, -1))
-            updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, -1)
+            neighbor_embeddings = torch.cat(
+                (entity_embeddings.unsqueeze(2).expand_as(relation_embeddings), relation_embeddings), dim=-1)
+            updated_embeddings = self.hiddenRNN(
+                neighbor_embeddings.reshape(batch_size * topk * max_neighbors, 2 * self.embed_size),
+                node_embeddings.reshape(batch_size * topk * max_neighbors, self.hidden_size))
+            updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, self.hidden_size)
         else:
             # (batch_size, topk, max_neighbors, embed_size + hidden_size) concatenated neighbor embeddings
-            neighbor_embeddings = torch.cat((node_embeddings, relation_embeddings), dim=-1)
-            neighbor_embeddings = self.pass_activation(self.pass_layer(neighbor_embeddings))
-            updated_embeddings = self.hidden_layer(node_embeddings) + neighbor_embeddings
-            updated_embeddings = self.update_activation(updated_embeddings)
+            neighbor_embeddings = relation_embeddings
+            updated_embeddings = self.hiddenRNN(
+                neighbor_embeddings.reshape(batch_size * topk * max_neighbors, self.embed_size),
+                node_embeddings.reshape(batch_size * topk * max_neighbors, self.hidden_size))
+            updated_embeddings = updated_embeddings.reshape(batch_size, topk, max_neighbors, self.hidden_size)
         # mask padding neighbors
-        masks = torch.arange(0, max_neighbors, device=neighbor_embeddings.device).view(1, 1,
-                                                                                       -1) >= neighbors_num.unsqueeze(
-            -1)
-        updated_embeddings = updated_embeddings.masked_fill(masks.unsqueeze(-1), 0.0)
-        # avoid division by zeros here
-        neighbors_num = neighbors_num.type(torch.float) + (neighbors_num == 0.0).type(torch.float)
-        updated_embeddings = updated_embeddings.sum(dim=2) / neighbors_num.unsqueeze(-1)
-        # apply layer normalization
-        # write the updated embeddings
-        self.node_embeddings[batch_index.unsqueeze(-1).expand_as(node_pos), node_pos] = updated_embeddings
+        if max_neighbors > 0:
+            masks = torch.arange(0, max_neighbors, device=neighbor_embeddings.device).view(1, 1,
+                                                                                           -1) >= neighbors_num.unsqueeze(
+                -1)
+            updated_embeddings = updated_embeddings.masked_fill(masks.unsqueeze(-1), 0.0)
+            # avoid division by zeros here
+            neighbors_num = neighbors_num.type(torch.float) + (neighbors_num == 0.0).type(torch.float)
+            updated_embeddings = updated_embeddings.sum(dim=2) / neighbors_num.unsqueeze(-1)
+            if not self.use_message:
+                updated_embeddings = torch.cat((updated_embeddings, entity_embeddings), dim=-1)
+                updated_embeddings = self.update_activation(self.update_layer(updated_embeddings))
+            # write the updated embeddings
+            self.node_embeddings[batch_index.unsqueeze(-1), aim_nodes] = updated_embeddings
 
     def next_hop(self, currents: tuple, candidates) -> (torch.Tensor, torch.Tensor):
         """
-        :param currents: (batch_size, ) pos of current entities
-        :param candidates: entity id (batch_size, max_neighbors)
-                           node pos (batch_size, max_neighbors)
-                           relation id (batch_size, max_neighbors)
-                           num (batch_size, )
+        :param currents: (batch_size, rollout_num) pos of current entities
+        :param candidates: entity id (batch_size, rollout_num, max_neighbors)
+                           node pos (batch_size, rollout_num, max_neighbors)
+                           relation id (batch_size, rollout_num, max_neighbors)
+                           mask (batch_size, rollout_num, max_neighbors)
         :param topk: topk actions to select
         :return: entity id (batch_size, topk), relation id (batch_size, topk) mask (batch_size, topk)
         """
-        current_nodes, current_entities = currents
+        current_nodes, current_entities, current_masks = currents
         candidate_nodes, candidate_entities, candidate_relations, candidate_masks = candidates
-        batch_size, max_neighbors = candidate_nodes.size()
-        batch_index = torch.arange(batch_size, device=current_nodes.device)
+        batch_size, rollout_num, max_neighbors = candidate_nodes.size()
+        batch_index = torch.arange(batch_size, device=current_nodes.device).unsqueeze(1)
         # (batch_size, embed_size) get the hidden representations of current nodes
         current_representations = self.node_embeddings[batch_index, current_nodes]
-        current_embeddings = self.entity_embeddings(current_entities)
+        if self.use_entity_embed:
+            current_embeddings = self.entity_embeddings(current_entities)
+        else:
+            current_embeddings = current_representations.new_zeros((batch_size, rollout_num, self.embed_size))
         # concatenate the hidden states with query embeddings
-        current_embeddings = torch.cat((current_representations, self.query_representations, current_embeddings), dim=1)
+        current_embeddings = torch.cat(
+            (current_representations, self.query_representations.unsqueeze(1).expand(batch_size, rollout_num, -1),
+             current_embeddings), dim=-1)
         current_state = self.nexthop_activation(self.nexthop_layer(current_embeddings))
-        # (batch_size, max_neighbors, embed_size) get the node representations of candidates
-        node_embeddings = self.node_embeddings[batch_index.unsqueeze(-1).expand_as(candidate_nodes), candidate_nodes]
-        # (batch_size, max_neighbors, embed_size) get the entity embeddings of candidates
-        entity_embeddings = self.entity_embeddings(candidate_entities)
-        # (batch_size, max_neighbors, embed_size) get the relation embeddings of candidates
+        # (batch_size, rollout_num, max_neighbors, hidden_size) get the node representations of candidates
+        node_embeddings = self.node_embeddings[batch_index.unsqueeze(-1), candidate_nodes]
+        # (batch_size, rollout_num, max_neighbors, embed_size) get the entity embeddings of candidates
+        if self.use_entity_embed:
+            entity_embeddings = self.entity_embeddings(candidate_entities)
+        else:
+            entity_embeddings = node_embeddings.new_zeros((batch_size, rollout_num, max_neighbors, self.embed_size))
+        # (batch_size, rollout_num, max_neighbors, embed_size) get the relation embeddings of candidates
         relation_embeddings = self.relation_embeddings(candidate_relations)
-        # (batch_size, max_neighbors, 3 * embed_size) concatenated representations
+        # (batch_size, max_neighbors, 2 * embed_size + hidden_size) concatenated representations
         candidate_embeddings = torch.cat((node_embeddings, entity_embeddings, relation_embeddings), dim=-1)
         # (batch_size, max_neighbors, embed_size) transformed representations
         candidate_embeddings = self.candidate_activation(self.candidate_layer(candidate_embeddings))
-        # (batch_size, 1) thresholds for expansion
-        thresholds = self.gate_layer(current_state)
-        # (batch_size, max_neighbors) (batch_size, 1, 1, embed_size) * (batch_size, max_neighbors, embed_size, 1)
-        candidate_scores = torch.matmul(current_state.unsqueeze(1).unsqueeze(2),
-                                        candidate_embeddings.unsqueeze(-1)).squeeze(-1).squeeze(-1)
+        # (batch_size, rollout_num, max_neighbors) (batch_size, rollout_num, hidden_size) * (batch_size, rollout_num, max_neighbors, hidden_size)
+        candidate_scores = torch.matmul(candidate_embeddings, current_state.unsqueeze(-1)).squeeze(-1)
         candidate_scores /= self.sqrt_embed_size
         candidate_scores = candidate_scores.masked_fill(~candidate_masks, value=-1e5)
-        # generate the final scores with thresholds
-        final_scores = torch.cat((candidate_scores, thresholds), dim=1)
-        return final_scores, candidate_masks
+        return candidate_scores
 
     def compute_score(self, start_embeddings, end_embeddings, query_representations):
         diff_embeddings = start_embeddings - end_embeddings
@@ -423,24 +428,13 @@ class Agent(nn.Module):
         node_scores = self.rank_activation(node_scores)
         return node_scores
 
-    def rank(self):
-        """
-        :return:
-        """
-        node_embeddings = self.node_embeddings[:, :self.max_nodes]
-        # node_embeddings = torch.cat(
-        #     (self.node_embeddings[:, :1].expand(-1, self.max_nodes, -1), node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
-        node_embeddings = torch.cat(
-            (node_embeddings, self.query_representations.unsqueeze(1).expand(*node_embeddings.size()[:2], -1)), dim=2)
-        node_scores = self.rank_layer(node_embeddings).squeeze(-1)
-        node_scores = self.rank_activation(node_scores)
-        return node_scores
-
 
 class CogKR(nn.Module):
-    def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int, max_neighbors: int,
-                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True, baseline_lambda=0.0, onlyS=False,
-                 use_rnn=True, sparse_embed=False, use_rank=True, id2entity=None, id2relation=None):
+    def __init__(self, graph: grapher.KG, entity_dict: dict, relation_dict: dict, max_steps: int, max_nodes: int,
+                 max_neighbors: int,
+                 embed_size: int, topk: int, device, hidden_size: int = None, reward_policy='direct', use_summary=True,
+                 baseline_lambda=0.0, onlyS=False, update_hidden=True,
+                 message=True, entity_embed=True, sparse_embed=False, id2entity=None, id2relation=None):
         nn.Module.__init__(self)
         self.graph = graph
         self.entity_dict = entity_dict
@@ -453,13 +447,15 @@ class CogKR(nn.Module):
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         self.onlyS = onlyS
-        self.use_rank = use_rank
+        self.update_hidden = update_hidden
         if hidden_size is None:
             self.hidden_size = embed_size
         self.topk = topk
-        self.entity_embeddings = nn.Embedding(len(entity_dict) + 1, embed_size, padding_idx=len(entity_dict),
+        self.entity_num = len(entity_dict) + 1
+        self.entity_embeddings = nn.Embedding(self.entity_num, embed_size, padding_idx=len(entity_dict),
                                               sparse=sparse_embed)
-        self.relation_embeddings = nn.Embedding(len(relation_dict) + 1, embed_size, padding_idx=len(relation_dict),
+        self.relation_num = len(relation_dict) + 1
+        self.relation_embeddings = nn.Embedding(self.relation_num, embed_size, padding_idx=len(relation_dict),
                                                 sparse=sparse_embed)
         self.cog_graph = CogGraph(self.graph, self.entity_dict, self.relation_dict, len(self.entity_dict),
                                   len(self.relation_dict), self.max_nodes, self.max_neighbors, self.topk, device)
@@ -470,20 +466,14 @@ class CogKR(nn.Module):
             query_size = embed_size
             print("Not use summary module")
         self.agent = Agent(self.entity_embeddings, self.relation_embeddings, self.max_nodes, self.embed_size,
-                           self.hidden_size, query_size=query_size, use_rnn=use_rnn)
+                           self.hidden_size, query_size=query_size, message=message, entity_embed=entity_embed)
         if self.onlyS:
             self.loss = nn.MarginRankingLoss(margin=1.0)
         else:
             self.loss = nn.CrossEntropyLoss(reduction='sum')
-        self.statistician = False
-        self.statistics = {'graph_size': []}
         self.reward_policy = reward_policy
         self.reward_baseline = 0.0
         self.baseline_lambda = baseline_lambda
-
-    def clear_statistics(self):
-        for value in self.statistics.values():
-            value.clear()
 
     def find_correct_tails(self, node_lists, end_entities, only_last=False):
         assert len(node_lists) == len(end_entities)
@@ -504,7 +494,7 @@ class CogKR(nn.Module):
                 correct_batch.append(batch_id)
         return correct_batch, correct_nodes
 
-    def get_correct_path(self, relations, correct_tails, verbose=False, return_graph=False):
+    def get_correct_path(self, correct_tails, return_graph=False):
         correct_batch, correct_nodes = self.find_correct_tails(self.cog_graph.node_lists, correct_tails)
         graphs = self.cog_graph.to_networkx()
         if return_graph:
@@ -512,8 +502,6 @@ class CogKR(nn.Module):
         else:
             reason_list = [[] for _ in range(len(correct_tails))]
         for batch_id, node_id in zip(correct_batch, correct_nodes):
-            if verbose:
-                print("{}: Query relation: {}".format(batch_id, self.id2relation[relations[batch_id]]))
             correct_tail = self.id2entity[self.cog_graph.node_lists[batch_id][node_id]]
             head = self.id2entity[self.cog_graph.node_lists[batch_id][0]]
             graph = graphs[batch_id]
@@ -541,10 +529,11 @@ class CogKR(nn.Module):
                 reason_list[batch_id] = reason_paths
         return reason_list
 
-    def forward(self, start_entities: list, other_correct_answers: list, end_entities=None, ground_graphs=None, evaluate_graphs=None,
+    def forward(self, start_entities: list, other_correct_answers: list, end_entities=None,
                 support_pairs=None, relations=None, evaluate=False, candidates=None):
         batch_size = len(start_entities)
         device = self.entity_embeddings.weight.device
+        batch_index = torch.arange(0, batch_size, device=device)
         if support_pairs is not None:
             # support for evaluate
             support_embeddings = self.summary(support_pairs, evaluate=evaluate)
@@ -572,99 +561,121 @@ class CogKR(nn.Module):
                 support_embeddings = support_embeddings.unsqueeze(1)
                 negative_entities = torch.randint(0, self.entity_embeddings.num_embeddings, size=(
                     batch_size, 1000), device=device)
-                positive_scores = self.agent.compute_score(self.entity_embeddings(start_entities), self.entity_embeddings(end_entities), support_embeddings)
-                negative_scores = self.agent.compute_score(self.entity_embeddings(start_entities), self.entity_embeddings(negative_entities), support_embeddings)
+                positive_scores = self.agent.compute_score(self.entity_embeddings(start_entities),
+                                                           self.entity_embeddings(end_entities), support_embeddings)
+                negative_scores = self.agent.compute_score(self.entity_embeddings(start_entities),
+                                                           self.entity_embeddings(negative_entities),
+                                                           support_embeddings)
                 labels = torch.ones(batch_size, 1000, dtype=torch.float, device=device)
                 rank_loss = self.loss(positive_scores, negative_scores, labels)
                 return torch.zeros(1, dtype=torch.float, device=device), rank_loss
-        self.cog_graph.init(start_entities, other_correct_answers, evaluate_graphs, evaluate=evaluate)
+        self.cog_graph.init(start_entities, other_correct_answers, evaluate=evaluate)
         start_entities = torch.tensor(start_entities, device=device, dtype=torch.long)
+        if end_entities is not None:
+            end_entities = torch.tensor(end_entities, device=device, dtype=torch.long)
         self.agent.init(start_entities, query_representations=support_embeddings)
         # TODO: Normalize graph loss and entropy loss with time step
-        graph_loss, entropy_loss = 0.0, 0.0
-        for step in range(self.max_steps):
-            currents, candidates = self.cog_graph.step(step == self.max_steps - 1)
-            if sum(self.cog_graph.stop_states) == batch_size:
-                break
-            final_scores, candidate_masks = self.agent.next_hop(currents, candidates)
-            # Not use stop action
-            # TODO stop_action is removed now
-            final_scores = final_scores[:, :-1]
-            # use stochastic policy to sample actions
-            m = torch.distributions.multinomial.Multinomial(total_count=self.topk, logits=final_scores)
-            final_counts = m.sample()
-            action_counts = final_counts
-            action_counts, actions = action_counts.topk(k=min(self.topk, action_counts.size(1)), dim=-1)
-            action_nums = (action_counts > 0).sum(dim=1)
-            log_prob = m.log_prob(final_counts) * (~torch.tensor(self.cog_graph.stop_states, device=device)).float()
-            graph_loss = log_prob + graph_loss
-            if not evaluate:
-                # compute policy gradient here
-                entropy = -(torch.softmax(final_scores, dim=-1) * nn.functional.log_softmax(final_scores, dim=-1)).sum(dim=-1).mean()
-                entropy_loss += entropy
-            aims, neighbors = self.cog_graph.update(actions, action_nums)
-            self.agent.aggregate(aims, neighbors)
-        if self.statistician:
-            self.statistics['graph_size'] += list(map(len, self.cog_graph.node_lists))
-        self.graph_size = statistics.mean(map(len, self.cog_graph.node_lists))
-        if self.use_rank:
-            node_scores = self.agent.rank()
-        if not evaluate:
-            correct_batch, correct_nodes = self.find_correct_tails(self.cog_graph.node_lists, end_entities, only_last=not self.use_rank)
-            if self.use_rank and len(correct_batch) > 0:
-                batch_index = torch.arange(len(correct_batch), device=device)
-                correct_batch = torch.tensor(correct_batch, dtype=torch.long, device=device)
-                correct_nodes = torch.tensor(correct_nodes, dtype=torch.long, device=device)
-                node_scores = node_scores[correct_batch]
-                node_nums = torch.tensor(list(map(len, self.cog_graph.node_lists)), dtype=torch.float,
-                                         device=device)[correct_batch]
-                masks = torch.arange(0, self.agent.max_nodes, dtype=torch.float, device=device).expand_as(
-                    node_scores) >= node_nums.unsqueeze(-1)
-                node_scores.masked_fill_(masks, -1e6)
-                rank_loss = self.loss(node_scores, correct_nodes) / batch_size
-            else:
-                rank_loss = torch.zeros(1, device=device)
-            if self.reward_policy == 'ranking':
-                _, rank_index = torch.sort(node_scores, descending=True, dim=-1)
-                rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
-                if len(correct_batch) > 0:
-                    rewards[correct_batch] = 1.0 / (rank_index[batch_index, correct_nodes] + 1).float()
-            elif self.reward_policy == 'predict':
-                rewards, _ = F.softmax(node_scores, dim=-1).max(dim=-1)
-            elif self.reward_policy == 'probability':
-                rewards = torch.full((batch_size,), -10, device=device, dtype=torch.float)
-                if len(correct_batch) > 0:
-                    rewards[correct_batch] = torch.log(
-                        F.softmax(node_scores.detach(), dim=-1)[batch_index, correct_nodes] + 1e-10)
-            elif self.reward_policy == 'direct':
-                # directly use finding reward
-                rewards = torch.zeros(batch_size, device=device, dtype=torch.float)
-                rewards[correct_batch] = 1.0
-            else:
-                raise NotImplementedError
-            self.reward = rewards.mean().item()
-            if self.baseline_lambda > 0.0:
-                self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
-                    self.baseline_lambda * rewards.mean().item()
-                rewards -= self.reward_baseline
-            graph_loss = (- rewards.detach() * graph_loss).mean()
-            return graph_loss, rank_loss, entropy_loss
+        if self.reward_policy == 'direct':
+            attention = torch.zeros(batch_size, self.entity_num, device=device)
+            attention[batch_index, start_entities] = 1
         else:
-            # delete the start entities
-            if self.use_rank:
-                node_scores[:, 0] = -1e5
-                node_scores = torch.softmax(node_scores, dim=-1)
-                rank_scores, rank_index = torch.sort(node_scores, descending=True, dim=-1)
-                rank_scores = rank_scores.tolist()
-                rank_index = rank_index.tolist()
-                results = []
-                for batch_id in range(batch_size):
-                    result = [self.cog_graph.node_lists[batch_id][node_id] for node_id in rank_index[batch_id] if
-                    node_id < len(self.cog_graph.node_lists[batch_id])]
-                    results.append(result)
+            graph_loss, entropy_loss = 0.0, 0.0
+        current_entities = start_entities.unsqueeze(1)
+        current_masks = torch.ones(batch_size, 1, dtype=torch.uint8, device=device)
+        for step in range(self.max_steps):
+            currents, candidates = self.cog_graph.step((current_entities, current_masks), step == self.max_steps - 1)
+            candidate_nodes, candidate_entities, candidate_relations, candidate_masks = candidates
+            final_scores = self.agent.next_hop(currents, candidates)
+            final_scores = torch.softmax(final_scores, dim=-1)
+            if self.reward_policy == 'direct':
+                attention_scores = attention[batch_index.unsqueeze(1), current_entities]
+                final_scores = final_scores * attention_scores.unsqueeze(-1)
+                final_scores = final_scores.reshape((batch_size, -1))
+                if step != self.max_steps - 1:
+                    action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
+                    action_masks = candidate_masks.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
+                    action_nums = ((action_scores > 1e-10) & action_masks).sum(dim=1)
+                    action_entities = candidate_entities.reshape((batch_size, -1))[batch_index.unsqueeze(-1), actions]
+                    attention = torch_scatter.scatter_add(action_scores, action_entities, dim=-1,
+                                                          dim_size=self.entity_num)
+                    # attention /= attention.sum(dim=-1, keepdim=True)
+                    attention = torch.nn.functional.normalize(attention, p=1, dim=-1)
+                    aims, neighbors, currents = self.cog_graph.update(actions, action_nums)
+                    current_entities, current_masks = currents
+                    if self.update_hidden:
+                        self.agent.aggregate(aims, neighbors)
+                else:
+                    attention = torch_scatter.scatter_add(final_scores, candidate_entities.reshape((batch_size, -1)),
+                                                          dim=-1, dim_size=self.entity_num)
+                    # attention /= attention.sum(dim=-1, keepdim=True)
+                    attention = torch.nn.functional.normalize(attention, p=1, dim=-1)
+                    if end_entities is not None:
+                        action_entities = candidate_entities.reshape((batch_size, -1))
+                        final_scores = (action_entities == end_entities.unsqueeze(-1)).float()
+                        action_scores, actions = final_scores.topk(k=min(self.topk, final_scores.size(-1)), dim=-1)
+                        action_nums = (action_scores > 1e-10).sum(dim=1)
+                        self.cog_graph.update(actions, action_nums)
+            elif self.reward_policy == 'stochastic':
+                if not evaluate:
+                    entropy = -(final_scores * torch.log(final_scores + 1e-10)).sum(dim=-1).mean()
+                    entropy_loss += entropy
+                final_scores = final_scores.masked_fill(~current_masks.bool().unsqueeze(-1), 0.0)
+                final_scores = final_scores.reshape((batch_size, -1))
+                m = torch.distributions.multinomial.Multinomial(total_count=self.topk, probs=final_scores)
+                action_counts = m.sample()
+                log_prob = m.log_prob(action_counts)
+                graph_loss = graph_loss + log_prob
+                actions = torch.argsort(action_counts, dim=-1, descending=True)
+                action_nums = (action_counts > 0).sum(dim=1)
+                actions = actions[:, :torch.max(action_nums)]
+                aims, neighbors, currents = self.cog_graph.update(actions, action_nums)
+                current_entities, current_masks = currents
+                if self.update_hidden:
+                    self.agent.aggregate(aims, neighbors)
             else:
-                rank_scores = graph_loss.unsqueeze(1).tolist()
-                results = []
-                for batch_id in range(batch_size):
-                    results.append(list(map(lambda x:self.cog_graph.node_lists[batch_id][x], self.cog_graph.current_nodes[batch_id])))
-            return results, rank_scores
+                raise NotImplemented
+        if not evaluate:
+            if self.reward_policy == 'direct':
+                correct_batch = attention[batch_index, end_entities] > 1e-10
+                self.reward = attention[batch_index, end_entities].sum().item() / batch_size
+                wrong_batch = batch_index[~correct_batch]
+                correct_batch = batch_index[correct_batch]
+                loss = -torch.log(attention[correct_batch, end_entities[correct_batch]] + 1e-10).sum()
+                loss = loss - torch.log(1.01 - attention[wrong_batch].sum(dim=-1)).sum()
+                loss = loss / batch_size
+                return loss, 0.0
+            elif self.reward_policy == 'stochastic':
+                rewards = (current_entities == end_entities.unsqueeze(-1)).any(dim=-1).float()
+                rewards /= current_masks.float().sum(dim=-1) + 1e-10
+                self.reward = rewards.mean().item()
+                if self.baseline_lambda > 0.0:
+                    self.reward_baseline = (1 - self.baseline_lambda) * self.reward_baseline + \
+                                           self.baseline_lambda * rewards.mean().item()
+                    rewards -= self.reward_baseline
+                graph_loss = (- rewards.detach() * graph_loss).mean()
+                return graph_loss, entropy_loss
+            else:
+                raise NotImplemented
+        else:
+            if self.reward_policy == 'direct':
+                # Unbiased evaluation protocol
+                # Zhiqing Sun, Shikhar Vashishth, Soumya Sanyal, Partha P. Talukdar, Yiming Yang:
+                # A Re-evaluation of Knowledge Graph Completion Methods. CoRR abs/1911.03903 (2019)
+                # https://arxiv.org/pdf/1911.03903.pdf
+                # TODO this will make Wiki-One slow
+                # rand_idxs = list(range(self.entity_num))
+                # random.shuffle(rand_idxs)
+                # entity_list = torch.arange(self.entity_num, device=device)[rand_idxs]
+                # attention = attention[:, rand_idxs]
+                # scores, results = attention.topk(dim=-1, k=20)
+                # results = entity_list[results]
+                # results = results.tolist()
+                # scores = scores.tolist()
+                # return results, scores
+                return attention
+            elif self.reward_policy == 'stochastic':
+                results = current_entities.tolist()
+                scores = graph_loss.unsqueeze(-1).expand_as(current_entities).tolist()
+                return results, scores
+            else:
+                raise NotImplemented

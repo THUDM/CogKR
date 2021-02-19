@@ -5,12 +5,12 @@
   },
   "model": {
     "message": true,
-    "max_steps": 5,
-    "max_nodes": 132,
+    "max_steps": 4,
+    "max_nodes": 100,
     "max_neighbors": 10,
     "embed_size": 100,
     "hidden_size": 200,
-    "topk": 32,
+    "topk": 16,
     "reward_policy": "direct",
     "baseline_lambda": 0.05
   },
@@ -20,7 +20,7 @@
       "lr": 1e-3
     },
     "summary": {
-      "lr": 1e-4
+      "lr": 1e-5
     },
     "agent": {
       "lr": 1e-3
@@ -34,18 +34,18 @@
   },
   "trainer": {
     "weighted_sample": true,
-    "ignore_onehop": false,
+    "ignore_onehop": true,
     "meta_learn": false,
     "sample_weight": 1.0,
     "rollout_num": 1,
     "test_rollout_num": 1
   },
   "train": {
-    "batch_size": 42,
-    "test_batch_size": 84,
+    "batch_size": 100,
+    "test_batch_size": 128,
     "log_interval": 50,
-    "evaluate_interval": 100,
-    "max_steps": 30000,
+    "evaluate_interval": 300,
+    "max_steps": 80000,
     "entropy_beta": 0.05
   },
   "pretrain": {
