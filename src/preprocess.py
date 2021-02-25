@@ -42,10 +42,24 @@ class Preprocess:
 
     def load_raw_data(self):
         self.train_facts = load_facts(os.path.join(self.data_directory, "train.txt"))
-        self.test_facts = load_facts(os.path.join(self.data_directory, "test_support.txt")) + load_facts(
-            os.path.join(self.data_directory, "test_eval.txt"))
-        self.valid_facts = load_facts(os.path.join(self.data_directory, "valid_support.txt")) + load_facts(
-            os.path.join(self.data_directory, "valid_eval.txt"))
+        test_support_facts = []
+        if os.path.exists(os.path.join(self.data_directory, "test_support.txt")):
+            test_support_facts = load_facts(os.path.join(self.data_directory, "test_support.txt"))
+        else:
+            print("Cannot find test support file")
+        test_eval = os.path.join(self.data_directory, "test_eval.txt")
+        if not os.path.exists(test_eval):
+            test_eval = os.path.join(self.data_directory, "test.txt")
+        self.test_facts = test_support_facts + load_facts(test_eval)
+        valid_support_facts = []
+        if os.path.exists(os.path.join(self.data_directory, "valid_support.txt")):
+            valid_support_facts = load_facts(os.path.join(self.data_directory, "valid_support.txt"))
+        else:
+            print("Cannot find valid support file")
+        valid_eval = os.path.join(self.data_directory, "valid_eval.txt")
+        if not os.path.exists(valid_eval):
+            valid_eval = os.path.join(self.data_directory, "valid.txt")
+        self.valid_facts = valid_support_facts + load_facts(valid_eval)
         if os.path.exists(os.path.join(self.data_directory, "rel2candidates.json")):
             print("Load rel2candidates")
             self.rel2candidate = unserialize(os.path.join(self.data_directory, "rel2candidates.json"))
