@@ -36,7 +36,7 @@ To use your own dataset, see the "Use your dataset" part below.
 ### Preprocess
 
 ```shell
-python src/main.py --directory datasets/{dataset_name} --process_data
+python src/preprocess.py --directory datasets/{dataset_name} --process_data
 ```
 
 ### Training
@@ -76,8 +76,8 @@ To use your own dataset, please put the files of the dataset under `datasets/` i
     -test_eval.txt
     -ent2id.txt (optional)
     -relation2id.txt (optional)
-    -entity2vec.{embed_name}
-    -relation2vec.{embed_name}
+    -entity2vec.{embed_name} (optional)
+    -relation2vec.{embed_name} (optional)
     -rel2candidates.json (optional)
 ```
 

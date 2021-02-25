@@ -108,7 +108,8 @@ class Preprocess:
         serialize(evaluate_graphs, os.path.join(self.data_directory, "evaluate_graphs"))
 
     def compute_pagerank(self):
-        self.kg = KG(self.train_facts, entity_num=len(self.entity_dict), relation_num=len(self.relation_dict))
+        self.kg = KG(self.train_facts, entity_num=len(self.entity_dict), relation_num=len(self.relation_dict),
+                     build_matrix=False)
         graph = networkx.DiGraph(self.kg.to_networkx())
         print("Begin to compute pagerank")
         self.pagerank = pagerank(graph)
@@ -150,6 +151,7 @@ def preprocess_embedding(embed_path, data_path, model, output_path, output_model
                      os.path.join(output_path, "entity2vec." + output_model), entity_dict)
     output_embedding(os.path.join(data_path, "relation2id.txt"), state_dict['relation_embeddings.weight'],
                      os.path.join(output_path, "relation2vec." + output_model), relation_dict)
+
 
 if __name__ == "__main__":
     from parse_args import args
