@@ -36,7 +36,7 @@ To use your own dataset, see the "Use your dataset" part below.
 ### Preprocess
 
 ```shell
-python src/preprocess.py --directory datasets/{dataset_name} --process_data
+python src/preprocess.py --directory datasets/{dataset_name} --process_data --save_train
 ```
 
 ### Training
