@@ -26,7 +26,7 @@ class Main:
         self.comment = comment
         self.device = device
         self.config = {
-            "trainer": {},
+            "trainer": {"evaluate_inverse": False},
             'train': {
                 'entropy_beta': 0.0,
                 'validate_metric': 'MAP'
@@ -103,11 +103,18 @@ class Main:
         test_eval = os.path.join(self.data_directory, "test_eval.txt")
         if not os.path.exists(test_eval):
             test_eval = os.path.join(self.data_directory, "test.txt")
-        self.test_eval = translate_facts(load_facts(test_eval), self.entity_dict, self.relation_dict)
+        test_eval = load_facts(test_eval)
+        if self.config["trainer"]["evaluate_inverse"]:
+            test_eval = add_reverse_relations(test_eval)
+            print(f"Test facts {len(test_eval)} after adding inverse")
+        self.test_eval = translate_facts(test_eval, self.entity_dict, self.relation_dict)
         valid_eval = os.path.join(self.data_directory, "valid_eval.txt")
         if not os.path.exists(valid_eval):
             valid_eval = os.path.join(self.data_directory, "valid.txt")
-        self.valid_eval = translate_facts(load_facts(valid_eval), self.entity_dict, self.relation_dict)
+        valid_eval = load_facts(valid_eval)
+        if self.config["trainer"]["evaluate_inverse"]:
+            valid_eval = add_reverse_relations(valid_eval)
+        self.valid_eval = translate_facts(valid_eval, self.entity_dict, self.relation_dict)
         # augment
         with open(os.path.join(self.data_directory, 'pagerank.txt')) as file:
             self.pagerank = list(map(lambda x: float(x.strip()), file.readlines()))

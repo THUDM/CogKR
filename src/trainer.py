@@ -13,7 +13,7 @@ class Trainer:
                  test_tasks=None, validate_tasks=None,
                  rel2candidate: dict = None, id2entity=None, id2relation=None, fact_dist=None,
                  weighted_sample=True, ignore_onehop=False, meta_learn=True, sample_weight=0.75, rollout_num=1,
-                 test_rollout_num=1, dist_limit=5):
+                 test_rollout_num=1, dist_limit=5, **kwargs):
         self.graph = graph
         self.cutoff = cutoff
         self.reverse_relation = reverse_relation
