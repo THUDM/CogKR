@@ -390,7 +390,10 @@ class Agent(nn.Module):
         current_nodes, current_entities, current_masks = currents
         candidate_nodes, candidate_entities, candidate_relations, candidate_masks = candidates
         batch_size, rollout_num, max_neighbors = candidate_nodes.size()
-        batch_index = torch.arange(batch_size, device=current_nodes.device).unsqueeze(1)
+        try:
+            batch_index = torch.arange(batch_size, device=current_nodes.device).unsqueeze(1)
+        except RuntimeError as exception:
+            batch_index = torch.arange(batch_size, device=current_nodes.device).unsqueeze(1)
         # (batch_size, embed_size) get the hidden representations of current nodes
         current_representations = self.node_embeddings[batch_index, current_nodes]
         if self.use_entity_embed:
