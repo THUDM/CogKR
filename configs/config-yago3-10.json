@@ -5,12 +5,12 @@
   },
   "model": {
     "message": true,
-    "max_steps": 5,
-    "max_nodes": 132,
+    "max_steps": 4,
+    "max_nodes": 200,
     "max_neighbors": 10,
     "embed_size": 100,
     "hidden_size": 200,
-    "topk": 32,
+    "topk": 64,
     "reward_policy": "direct",
     "baseline_lambda": 0.05
   },
