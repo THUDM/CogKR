@@ -1,4 +1,8 @@
 # CogKR
+[CogKR: Cognitive Graph for Multi-hop Knowledge Reasoning](https://www.computer.org/csdl/journal/tk/5555/01/09512424/1w0wzCuvnA4)
+
+Accepted to IEEE TKDE.
+
 **Under construction**.
 
 ## Prerequisites
@@ -23,13 +27,14 @@ Please install dependencies by
 ```shell
 pip install -r requirements.txt
 ```
+Then install [pytorch_scatter](https://github.com/rusty1s/pytorch_scatter) manually.
 
 ### Dataset
-Two public datasets FB15K-237 and WN18RR are used for knowledge graph completion. The original datasets can be downloaded from [FB15K-237](https://www.microsoft.com/en-us/download/details.aspx?id=52312) and [WN18RR](https://github.com/TimDettmers/ConvE).
+Three public datasets FB15K-237, WN18RR, and YAGO3-10 are used for knowledge graph completion. The original datasets can be downloaded from [FB15K-237](https://www.microsoft.com/en-us/download/details.aspx?id=52312), [WN18RR](https://github.com/TimDettmers/ConvE), and [YAGO3-10](https://github.com/TimDettmers/ConvE/raw/master/YAGO3-10.tar.gz).
 
 Two public datasets NELL-One and Wiki-One (slightly modified) are used for one-shot link prediction. The original datasets can be downloaded from [One-shot Relational Learning](https://github.com/xwhan/One-shot-Relational-Learning). You can download the preprocessed datasets from the [link](https://mailstsinghuaeducn-my.sharepoint.com/:f:/g/personal/duzx16_mails_tsinghua_edu_cn/El-XlZVxAtNMkVTUN5-KB5gBupAOgY-qMVvf702aVceIgw?e=LcWwqz) in OneDrive. If you're in regions where OneDrive is not available (e.g. Mainland China), try to the [link](https://cloud.tsinghua.edu.cn/d/4ba979c61b6f40cc9be8/) in Tsinghua Cloud.
 
-After downloading the dataset, please unzip it into the datasets folder.
+After downloading the dataset, please unzip it into the `datasets/{dataset_name}/data` folder.
 
 To use your own dataset, see the "Use your dataset" part below.
 
@@ -44,7 +49,7 @@ python src/preprocess.py --directory datasets/{dataset_name} --process_data --sa
 For training, simply sun
 
 ```shell
-python src/main.py --directory {dataset_path} --gpu {gpu_id} --config {config_file} --comment {experiment_name}
+python src/main.py --directory datasets/{dataset_name} --gpu {gpu_id} --config {config_file} --comment {experiment_name}
 ```
 
 Use `dataset_path` to specify the path to the dataset.
@@ -92,15 +97,19 @@ To use your own dataset, please put the files of the dataset under `datasets/` i
 Please cite our paper if you use the code or datasets in your own work:
 
 ```
-@article{du2019cogkr,
-  author    = {Zhengxiao Du and
-               Chang Zhou and
-               Ming Ding and
-               Hongxia Yang and
-               Jie Tang},
-  title     = {Cognitive Knowledge Graph Reasoning for One-shot Relational Learning},
-  journal   = {CoRR},
-  volume    = {abs/1906.05489},
-  year      = {2019}
+@ARTICLE {9512424,
+author = {Z. Du and C. Zhou and J. Yao and T. Tu and L. Cheng and H. Yang and J. Zhou and J. Tang},
+journal = {IEEE Transactions on Knowledge & Data Engineering},
+title = {CogKR: Cognitive Graph for Multi-hop Knowledge Reasoning},
+year = {5555},
+volume = {},
+number = {01},
+issn = {1558-2191},
+pages = {1-1},
+keywords = {cognition;task analysis;urban areas;training;computational modeling;benchmark testing;scalability},
+doi = {10.1109/TKDE.2021.3104310},
+publisher = {IEEE Computer Society},
+address = {Los Alamitos, CA, USA},
+month = {aug}
 }
 ```

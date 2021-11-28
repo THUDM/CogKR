@@ -404,7 +404,7 @@ class Main:
                     for key, value in validate_results.items():
                         if key not in self.best_results or value > self.best_results[key]:
                             self.best_results[key] = value
-                if self.steps_no_improve > 10000:
+                if self.steps_no_improve > 15000:
                     self.logger.info(f"Training stops after no improvement step {self.steps_no_improve}")
                     return
             self.local = locals()
