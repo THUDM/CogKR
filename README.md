@@ -65,7 +65,7 @@ Use `gpu_id` to specify the id of the gpu to use.
 For evaluation, simply run
 
 ```shell
-python src/main.py --inference --directory {dataset_path} --gpu {gpu_id} --config {config_file} --load_state {state_file}
+python src/main.py --inference --directory datasets/{dataset_name} --gpu {gpu_id} --config {config_file} --load_state {state_file}
 ```
 
 ### Use Your Own Dataset
