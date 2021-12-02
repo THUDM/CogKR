@@ -27,7 +27,7 @@ Please install dependencies by
 ```shell
 pip install -r requirements.txt
 ```
-Then install [pytorch_scatter](https://github.com/rusty1s/pytorch_scatter) manually.
+Then install [pytorch_scatter](https://github.com/rusty1s/pytorch_scatter) 2.0.4 manually.
 
 ### Dataset
 Three public datasets FB15K-237, WN18RR, and YAGO3-10 are used for knowledge graph completion. The original datasets can be downloaded from [FB15K-237](https://www.microsoft.com/en-us/download/details.aspx?id=52312), [WN18RR](https://github.com/TimDettmers/ConvE), and [YAGO3-10](https://github.com/TimDettmers/ConvE/raw/master/YAGO3-10.tar.gz).

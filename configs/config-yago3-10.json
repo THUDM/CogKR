@@ -6,7 +6,7 @@
   "model": {
     "message": true,
     "max_steps": 4,
-    "max_nodes": 200,
+    "max_nodes": 196,
     "max_neighbors": 10,
     "embed_size": 100,
     "hidden_size": 200,
@@ -36,7 +36,7 @@
     "weighted_sample": true,
     "ignore_onehop": false,
     "meta_learn": false,
-    "evaluate_inverse": true,
+    "evaluate_inverse": false,
     "sample_weight": 1.0,
     "rollout_num": 1,
     "test_rollout_num": 1
